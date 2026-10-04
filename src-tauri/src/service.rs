@@ -102,6 +102,12 @@ impl TabBridge for Tabs {
         }
     }
 
+    fn flush(&mut self, timeout: Duration) {
+        if let Some(bridge) = &mut self.0 {
+            bridge.flush(timeout);
+        }
+    }
+
     fn volume(&mut self, tab: TabId) -> BackendResult<f32> {
         match &mut self.0 {
             Some(bridge) => bridge.volume(tab),

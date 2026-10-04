@@ -1,5 +1,6 @@
 use std::io::ErrorKind;
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
@@ -48,6 +49,8 @@ struct State {
 struct Client {
     id: u64,
     outgoing: Sender<ServerMessage>,
+    /// Messages queued for the socket and not yet written to it.
+    pending: Arc<AtomicUsize>,
     browser: AppId,
     tabs: Vec<TabInfo>,
     source: Option<SourceState>,
@@ -98,7 +101,25 @@ impl Bridge {
     fn send(&self, message: ServerMessage) -> BackendResult<()> {
         let state = self.state();
         let client = state.client.as_ref().ok_or_else(not_connected)?;
-        client.outgoing.send(message).map_err(|_| not_connected())
+        client.pending.fetch_add(1, Ordering::SeqCst);
+        client.outgoing.send(message).map_err(|_| {
+            client.pending.fetch_sub(1, Ordering::SeqCst);
+            not_connected()
+        })
+    }
+
+    /// Waits until everything queued has been written to the socket, or
+    /// `timeout` has passed. Used before exiting, so a final "restore the
+    /// volume" is not lost in the queue.
+    pub fn flush(&self, timeout: Duration) {
+        let pending = match self.state().client.as_ref() {
+            Some(client) => Arc::clone(&client.pending),
+            None => return,
+        };
+        let deadline = Instant::now() + timeout;
+        while pending.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     fn command(&self, cmd: CommandKind, tab: TabId, volume: Option<f32>) -> BackendResult<()> {
@@ -183,6 +204,10 @@ impl TabBridge for Bridge {
     fn play(&mut self, tab: TabId) -> BackendResult<()> {
         self.command(CommandKind::Resume, tab, None)
     }
+
+    fn flush(&mut self, timeout: Duration) {
+        Bridge::flush(self, timeout);
+    }
 }
 
 /// Handles one connection from accept to close.
@@ -202,12 +227,14 @@ fn serve(stream: TcpStream, shared: &Shared) {
     }
 
     let (outgoing, incoming_commands) = mpsc::channel();
+    let pending = Arc::new(AtomicUsize::new(0));
     let id = {
         let mut state = shared.state.lock().expect("bridge state lock");
         let id = state.next_client_id;
         state.next_client_id += 1;
         // Tell the extension the current choice right away; it does not
         // remember it across restarts of its service worker.
+        pending.fetch_add(1, Ordering::SeqCst);
         let _ = outgoing.send(ServerMessage::SelectSource {
             tab_id: state.selected,
         });
@@ -215,6 +242,7 @@ fn serve(stream: TcpStream, shared: &Shared) {
         state.client = Some(Client {
             id,
             outgoing,
+            pending: Arc::clone(&pending),
             browser,
             tabs: Vec::new(),
             source: None,
@@ -222,7 +250,7 @@ fn serve(stream: TcpStream, shared: &Shared) {
         id
     };
 
-    pump(&mut socket, shared, id, &incoming_commands);
+    pump(&mut socket, shared, id, &incoming_commands, &pending);
 
     let mut state = shared.state.lock().expect("bridge state lock");
     if state.client.as_ref().is_some_and(|client| client.id == id) {
@@ -327,6 +355,7 @@ fn pump(
     shared: &Shared,
     id: u64,
     outgoing: &Receiver<ServerMessage>,
+    pending: &AtomicUsize,
 ) {
     loop {
         match socket.read() {
@@ -347,7 +376,9 @@ fn pump(
         loop {
             match outgoing.try_recv() {
                 Ok(message) => {
-                    if send(socket, &message).is_err() {
+                    let sent = send(socket, &message);
+                    pending.fetch_sub(1, Ordering::SeqCst);
+                    if sent.is_err() {
                         return;
                     }
                 }
@@ -607,6 +638,39 @@ mod tests {
             hear(&mut client),
             serde_json::json!({"type":"command","cmd":"resume","tabId":7})
         );
+    }
+
+    #[test]
+    fn flush_waits_until_queued_commands_are_written() {
+        let mut bridge = start();
+        let mut client = paired(&bridge);
+        wait_until("connected", || bridge.connected());
+
+        bridge.set_volume(TabId(7), 0.9).unwrap();
+        bridge.flush(Duration::from_secs(2));
+
+        let pending = {
+            let state = bridge.state();
+            state
+                .client
+                .as_ref()
+                .unwrap()
+                .pending
+                .load(Ordering::SeqCst)
+        };
+        assert_eq!(pending, 0);
+        assert_eq!(
+            hear(&mut client),
+            serde_json::json!({"type":"command","cmd":"set_volume","tabId":7,"volume":0.9})
+        );
+    }
+
+    #[test]
+    fn flush_returns_at_once_when_nothing_is_connected() {
+        let bridge = start();
+        let started = Instant::now();
+        bridge.flush(Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]
