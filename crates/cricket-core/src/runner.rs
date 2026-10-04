@@ -604,11 +604,13 @@ mod tests {
                     id: MUSIC_TAB,
                     title: "Music".to_string(),
                     audible: browser.music_playing,
+                    controllable: true,
                 },
                 TabInfo {
                     id: TabId(2),
                     title: "Video".to_string(),
                     audible: browser.other_tab_audible,
+                    controllable: true,
                 },
             ]
         }

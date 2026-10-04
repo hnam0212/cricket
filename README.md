@@ -51,7 +51,7 @@ pnpm tauri build
 
 ## Chrome extension
 
-The extension lets Cricket use one browser tab as the music source and treat other tabs as activity. It talks to the app over a WebSocket on `127.0.0.1:47835`, protected by a pairing token.
+The extension lets Cricket use one browser tab as the music source and treat other tabs as activity. It talks to the app over a WebSocket on `127.0.0.1:47835`. The pairing token is never sent over the connection; the app and the extension each prove they know it. Update the app and the extension together.
 
 ```powershell
 pnpm install
@@ -62,6 +62,10 @@ pnpm -C extension build
 2. In Chrome, open `chrome://extensions`, turn on Developer mode, choose "Load unpacked" and select the `extension` folder.
 3. In Cricket, open "Browser extension" and copy the pairing token. Click the Cricket icon in Chrome's toolbar, paste the token and save. The popup should say "Connected to Cricket."
 4. Reload the tab that plays your music (tabs opened before the extension was installed cannot be controlled until reloaded), then pick it under "Music source".
+
+The extension only runs on a short list of music sites (YouTube, YouTube Music, Spotify, SoundCloud, Twitch, Bandcamp, Deezer, Tidal, Apple Music, Pandora, Mixcloud, Zing MP3, NhacCuaTui). For any other site, open the tab, click the Cricket icon and choose "Allow Cricket on this site"; Chrome asks once, and you can remove the site again from the same popup. Tabs on other sites still count as activity when they make sound; they just cannot be the music source.
+
+Tab numbers change when the browser restarts, so a saved tab source has to be picked again after a restart; Cricket tells you when that is the case.
 
 After changing extension code, rebuild and press the reload button on the extension's card in `chrome://extensions`.
 

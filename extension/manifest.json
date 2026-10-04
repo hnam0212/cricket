@@ -5,7 +5,12 @@
   "description": "Lets the Cricket desktop app use one browser tab as its music source and treat other tabs as activity.",
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu1G9MfmyMuie3m6zme4Yozm2/FYHV27gvmf1OwI1MOsCjOcEACAJPF3U//SRmN8cXwmZdmWACTcM3xw3rT4339HYrmvZdxpDl0zTcOFBtVGfjpYkOpJFclFDamzBbSNJV/rHUwg3uDunzDWYnPjb0YG7iHFnSm1YttW606JEp8CyrUFMxHcxQagrPljlZoEKRZwFj/8hy82cpu0yKybumT1sO++gUscXQ6IXtq5UcP21odN0PZoBra2VT7SlUnOD/khOCpYvqpaPd1rzNL7B9hJzATZYgDry+aikUXLL2KVBPX6dYcAtNkG3fcrvGDiXsQUYYhjltm0WhzAdZ1IC9wIDAQAB",
-  "permissions": ["tabs", "storage", "alarms"],
+  "permissions": [
+    "tabs",
+    "storage",
+    "alarms",
+    "scripting"
+  ],
   "background": {
     "service_worker": "dist/background.js"
   },
@@ -19,17 +24,50 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["dist/hook.js"],
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://open.spotify.com/*",
+        "*://*.soundcloud.com/*",
+        "*://*.twitch.tv/*",
+        "*://*.bandcamp.com/*",
+        "*://*.deezer.com/*",
+        "*://*.tidal.com/*",
+        "*://music.apple.com/*",
+        "*://*.pandora.com/*",
+        "*://*.mixcloud.com/*",
+        "*://*.zingmp3.vn/*",
+        "*://*.nhaccuatui.com/*"
+      ],
+      "js": [
+        "dist/hook.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "world": "MAIN"
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["dist/relay.js"],
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://open.spotify.com/*",
+        "*://*.soundcloud.com/*",
+        "*://*.twitch.tv/*",
+        "*://*.bandcamp.com/*",
+        "*://*.deezer.com/*",
+        "*://*.tidal.com/*",
+        "*://music.apple.com/*",
+        "*://*.pandora.com/*",
+        "*://*.mixcloud.com/*",
+        "*://*.zingmp3.vn/*",
+        "*://*.nhaccuatui.com/*"
+      ],
+      "js": [
+        "dist/relay.js"
+      ],
       "run_at": "document_start",
       "all_frames": true
     }
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
   ]
 }

@@ -223,6 +223,7 @@ mod tests {
             id: TabId(id),
             title: title.to_string(),
             audible,
+            controllable: true,
         }
     }
 

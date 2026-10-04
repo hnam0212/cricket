@@ -125,10 +125,24 @@ mod tests {
                 tabs: vec![TabInfo {
                     id: TabId(5),
                     title: "Mix".to_string(),
-                    audible: true
+                    audible: true,
+                    // Not said by the extension: assumed controllable.
+                    controllable: true,
                 }]
             }
         );
+    }
+
+    #[test]
+    fn a_tab_can_be_reported_as_not_controllable() {
+        let message: ClientMessage = serde_json::from_str(
+            r#"{"type":"tabs","tabs":[{"id":1,"title":"Docs","audible":false,"controllable":false}]}"#,
+        )
+        .unwrap();
+        let ClientMessage::Tabs { tabs } = message else {
+            panic!("not a tabs message");
+        };
+        assert!(!tabs[0].controllable);
     }
 
     #[test]

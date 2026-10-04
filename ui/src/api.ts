@@ -31,6 +31,8 @@ export interface TabInfo {
   id: number;
   title: string;
   audible: boolean;
+  /** The extension can reach this tab's player (the site is allowed). */
+  controllable: boolean;
 }
 
 export interface BridgeStatus {
