@@ -1,8 +1,9 @@
 //! Platform-agnostic core of Cricket.
 //!
-//! This crate must compile and test without any OS audio API. The engine,
-//! settings and the `AudioBackend` / `MediaController` traits land here in
-//! later phases.
+//! This crate must compile and test without any OS audio API. The engine and
+//! settings land here in later phases.
+
+pub mod audio;
 
 /// Version of the core crate, shown in the UI so we can tell the web side is
 /// really talking to the Rust side.
