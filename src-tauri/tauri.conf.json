@@ -14,8 +14,10 @@
       {
         "label": "main",
         "title": "Cricket",
-        "width": 480,
-        "height": 360
+        "width": 460,
+        "height": 680,
+        "minWidth": 380,
+        "minHeight": 140
       }
     ],
     "security": {

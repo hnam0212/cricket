@@ -410,7 +410,9 @@ dependencies = [
 name = "cricket"
 version = "0.1.0"
 dependencies = [
+ "cricket-audio-win",
  "cricket-core",
+ "serde",
  "tauri",
  "tauri-build",
 ]
