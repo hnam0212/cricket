@@ -113,10 +113,10 @@ See `CLAUDE.md` for layout and rules. Key points:
 Each phase ends with a manual test checklist for the user. Do not start the next phase before confirmation.
 
 ### Phase 0: Scaffold
-- [ ] Verify toolchain: Rust (MSVC), Node, pnpm, WebView2.
-- [ ] Cargo workspace with the crates in the layout, Tauri v2 app with React + TS + Vite.
-- [ ] fmt, clippy, tests wired; basic CI (GitHub Actions, Windows runner).
-- [ ] README with setup steps. CLAUDE.md commands section filled in.
+- [x] Verify toolchain: Rust (MSVC), Node, pnpm, WebView2.
+- [x] Cargo workspace with the crates in the layout, Tauri v2 app with React + TS + Vite.
+- [x] fmt, clippy, tests wired; basic CI (GitHub Actions, Windows runner).
+- [x] README with setup steps. CLAUDE.md commands section filled in.
 
 ### Phase 1: Windows audio probe
 - [ ] `AudioBackend` and `MediaController` traits in core.

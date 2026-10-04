@@ -37,12 +37,19 @@ cricket/
 
 ## Commands
 
-Fill these in after Phase 0 and keep them current.
+Keep these current. Run them from the repo root.
 
-- Dev: `pnpm tauri dev`
+- Install JS deps: `pnpm install`
+- Dev: `pnpm tauri dev` (Vite on `http://127.0.0.1:1420`, then the app window)
+- Release build: `pnpm tauri build`
 - Tests: `cargo test --workspace`
-- Lint: `cargo clippy --workspace -- -D warnings` and `cargo fmt --check`
+- Lint: `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`
 - UI checks: `pnpm -C ui lint` and `pnpm -C ui typecheck`
+- UI build: `pnpm -C ui build`
+
+The Tauri crate embeds `ui/dist` at compile time. On a fresh clone, run `pnpm -C ui build` before any cargo command that compiles `src-tauri`.
+
+TypeScript is pinned to 6.x because typescript-eslint does not support TypeScript 7 yet.
 
 ## Architecture rules
 
