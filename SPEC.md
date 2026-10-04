@@ -145,8 +145,8 @@ Each phase ends with a manual test checklist for the user. Do not start the next
 
 ### Phase 4: Chrome extension
 - [x] Bridge crate, pairing flow, extension (tabs list, select, pause, resume, fade).
-- [ ] Source picker shows Chrome tabs; scenarios 1 and 2 work.
-- [ ] Manual test on the user's real music sites.
+- [x] Source picker shows Chrome tabs; scenarios 1 and 2 work.
+- [x] Manual test on the user's real music sites.
 
 ### Phase 5: macOS
 - [ ] Core Audio process tap helper, `AudioBackend` and `MediaController` for macOS, permissions flow, signing and notarization.
