@@ -119,9 +119,9 @@ Each phase ends with a manual test checklist for the user. Do not start the next
 - [x] README with setup steps. CLAUDE.md commands section filled in.
 
 ### Phase 1: Windows audio probe
-- [ ] `AudioBackend` and `MediaController` traits in core.
-- [ ] Windows backend: enumerate sessions grouped by app, peak levels, mic capture state, session volume get and set, SMTC pause and resume.
-- [ ] A debug CLI that prints live sessions and peaks, and can pause and resume a chosen app and fade its volume.
+- [x] `AudioBackend` and `MediaController` traits in core.
+- [x] Windows backend: enumerate sessions grouped by app, peak levels, mic capture state, session volume get and set, SMTC pause and resume.
+- [x] A debug CLI that prints live sessions and peaks, and can pause and resume a chosen app and fade its volume.
 - [ ] Manual test: user runs it with Spotify, a game or video, Zoom or any mic app, and confirms the readings make sense.
 
 ### Phase 2: Engine
