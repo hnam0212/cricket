@@ -52,6 +52,8 @@ export interface Status {
   source: Source | null;
   enabled: boolean;
   playback: PlaybackState | null;
+  /** False while a browser tab has no live link; Cricket holds its state. */
+  source_available: boolean;
   volume: number | null;
   activity: Activity | null;
   apps: AppView[];

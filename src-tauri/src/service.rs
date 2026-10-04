@@ -39,6 +39,9 @@ pub struct Status {
     pub source: Option<Source>,
     pub enabled: bool,
     pub playback: Option<PlaybackState>,
+    /// The source can be seen. `false` while a browser tab has no live
+    /// link; the engine then holds its state.
+    pub source_available: bool,
     pub volume: Option<f32>,
     pub activity: Option<ActivityCause>,
     pub apps: Vec<AppView>,
@@ -174,6 +177,7 @@ impl Service {
             source: config.source.clone(),
             enabled: config.enabled,
             playback: None,
+            source_available: true,
             volume: None,
             activity: None,
             apps: Vec::new(),
@@ -351,6 +355,7 @@ impl Worker {
                 status.source = runner.source().cloned();
                 status.enabled = enabled;
                 status.playback = report.playback;
+                status.source_available = report.source_available;
                 status.volume = report.volume;
                 status.activity = report.activity;
                 status.tabs = report.tabs;

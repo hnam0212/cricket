@@ -128,6 +128,18 @@ export function activityText(activity: Activity | null): string {
 }
 
 /** The headline and the detail line of the status area. */
+/** A browser tab source that cannot be seen right now. Cricket keeps its state meanwhile. */
+function unavailableText(status: Status): { headline: string; detail: string } {
+  const reason = status.bridge.connected
+    ? "The tab is closed, or needs a reload so the extension can reach its player."
+    : "The browser extension is not connected.";
+  const held =
+    status.state === "PausedByCricket" || status.state === "FadingIn"
+      ? "Cricket will pick up where it left off once the tab is back."
+      : "Cricket will carry on once the tab is back.";
+  return { headline: "Waiting for the browser tab", detail: `${reason} ${held}` };
+}
+
 export function statusText(status: Status): { headline: string; detail: string } {
   if (status.fatal) {
     return { headline: "Audio is unavailable", detail: status.fatal };
@@ -137,6 +149,10 @@ export function statusText(status: Status): { headline: string; detail: string }
   }
   if (!status.enabled) {
     return { headline: "Cricket is off", detail: "Your music is left alone." };
+  }
+
+  if (!status.source_available) {
+    return unavailableText(status);
   }
 
   const cause = activityText(status.activity);
@@ -169,9 +185,7 @@ export function statusText(status: Status): { headline: string; detail: string }
         detail:
           status.source.kind === "app"
             ? `${status.source.app} is not open, or does not offer media controls.`
-            : status.bridge.connected
-              ? "The tab is closed, or needs a reload so the extension can reach its player."
-              : "The browser extension is not connected.",
+            : "The tab is not reporting.",
       };
     case "Idle":
       return { headline: strings.loading, detail: "" };

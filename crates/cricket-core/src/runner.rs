@@ -23,6 +23,10 @@ pub struct StepReport {
     pub activity: Option<ActivityCause>,
     pub playback: Option<PlaybackState>,
     pub volume: Option<f32>,
+    /// The music source could be seen this step. Always true for a desktop
+    /// app; for a browser tab it means the extension is connected and the
+    /// tab is reporting. While false the engine holds its state.
+    pub source_available: bool,
     pub output: TickOutput,
     /// Backend calls that failed during this step.
     pub errors: Vec<String>,
@@ -118,6 +122,7 @@ impl<A: AudioBackend, M: MediaController, B: TabBridge, C: Clock + Clone> Runner
             other_activity: false,
             playback: None,
             volume: None,
+            source_available: true,
         });
         let mut errors = Vec::new();
         self.execute(&source, &output.commands, &mut errors);
@@ -128,6 +133,8 @@ impl<A: AudioBackend, M: MediaController, B: TabBridge, C: Clock + Clone> Runner
         let mut report = StepReport {
             bridge_connected: self.tabs.connected(),
             tabs: self.tabs.tabs(),
+            // Only a tab source can be out of sight; see below.
+            source_available: true,
             ..StepReport::default()
         };
 
@@ -154,6 +161,9 @@ impl<A: AudioBackend, M: MediaController, B: TabBridge, C: Clock + Clone> Runner
                     &mut report.errors,
                 );
                 report.volume = optional(self.audio.volume(app), "read volume", &mut report.errors);
+                // A desktop app without a media session simply counts as not
+                // playing; there is no link that can drop.
+                report.source_available = true;
             }
             Source::Tab { id, .. } => {
                 let browser = self.tabs.browser();
@@ -166,6 +176,9 @@ impl<A: AudioBackend, M: MediaController, B: TabBridge, C: Clock + Clone> Runner
                 );
                 report.volume =
                     optional(self.tabs.volume(*id), "read tab volume", &mut report.errors);
+                // No fresh report means the extension is gone, or the tab is
+                // closed or silent about itself: we are blind, not paused.
+                report.source_available = report.playback.is_some();
             }
         }
         report.snapshot = Some(snapshot);
@@ -174,6 +187,7 @@ impl<A: AudioBackend, M: MediaController, B: TabBridge, C: Clock + Clone> Runner
             other_activity: report.activity.is_some(),
             playback: report.playback,
             volume: report.volume,
+            source_available: report.source_available,
         });
         let commands = report.output.commands.clone();
         self.execute(&source, &commands, &mut report.errors);
@@ -748,8 +762,15 @@ mod tests {
         let report = rig.step();
 
         assert_eq!(report.playback, None);
+        assert!(!report.source_available);
         assert!(report.errors.is_empty());
-        assert_eq!(rig.runner.state(), State::PausedByUser);
+        // Blind, not paused by the user: the state is held.
+        assert_eq!(rig.runner.state(), State::Playing);
         assert_eq!(rig.browser.borrow().pauses, 0);
+
+        rig.browser.borrow_mut().connected = true;
+        let report = rig.step();
+        assert!(report.source_available);
+        assert_eq!(rig.runner.state(), State::Playing);
     }
 }

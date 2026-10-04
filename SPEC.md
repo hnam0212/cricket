@@ -49,6 +49,7 @@ Transitions:
 - `FadingIn` to `Playing`: fade finished.
 - `FadingOut` or `FadingIn` back to the opposite direction if activity changes mid-fade (reverse smoothly from current volume, no jumps). The change must last the trigger delay before the fade reverses, so short gaps or blips do not make the volume wobble.
 - Any state to `PausedByUser`: the source stops by itself without a Cricket command. Return to `Playing` only when the source starts playing again.
+- Source not available (browser tab source whose extension is disconnected, or whose tab is closed or not reporting): the engine holds its state and sends no commands. Nothing is concluded from the missing reports, and the resume cooldown restarts once the source is back. A resume that was unconfirmed when the link dropped falls back to `PausedByCricket`.
 - Restore the source's original volume after every resume.
 - Never leave the source muted. The OS remembers per-app volume, so the volume is put back to the original as soon as the pause has taken effect, and is dropped to zero again only at the moment of resuming, just before the fade in. If Cricket exits or the user resumes by hand while paused, the music is audible.
 

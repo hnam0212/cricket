@@ -47,6 +47,12 @@ pub struct Observation {
     /// Volume of the source. `None` if it has no audio session, in which
     /// case the engine pauses and resumes without fading.
     pub volume: Option<f32>,
+    /// The engine can currently see and control the source. `false` while a
+    /// browser tab source has no live link (extension disconnected, tab
+    /// closed or not reporting yet): the other fields are then meaningless
+    /// and the engine holds its state instead of reading "no data" as "the
+    /// user paused the music".
+    pub source_available: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +134,8 @@ impl<C: Clock> Engine<C> {
         let mut commands = Vec::new();
         let next = if !self.enabled {
             self.tick_disabled(&mut commands)
+        } else if !observation.source_available {
+            self.tick_held(now)
         } else {
             match self.state {
                 State::Idle => Some(if playing {
@@ -192,6 +200,46 @@ impl<C: Clock> Engine<C> {
         self.restore_volume(commands);
         self.awaiting_since = None;
         Some((State::Idle, "disabled"))
+    }
+
+    /// The source cannot be seen. Nothing is concluded from the silence of
+    /// its reports and no command is sent (there is nobody to receive it);
+    /// the state waits for the link to come back.
+    fn tick_held(&mut self, now: Duration) -> Next {
+        // Blind time must not count toward the resume cooldown: after the
+        // link returns, the quiet period is measured afresh.
+        self.quiet_since = None;
+        match self.state {
+            State::Idle | State::Playing | State::PausedByUser => None,
+            State::FadingOut => {
+                // Do not let the fade jump ahead by the blind time.
+                self.fade_updated = now;
+                None
+            }
+            State::PausedByCricket => {
+                // A command still in flight gets a fresh window once the
+                // link is back.
+                if self.awaiting_since.is_some() {
+                    self.awaiting_since = Some(now);
+                }
+                None
+            }
+            State::FadingIn => {
+                if self.awaiting_since.take().is_some() {
+                    // The resume may or may not have arrived. Fall back to
+                    // "paused by Cricket": if the source is playing when the
+                    // link returns, that is picked up as a resume and the
+                    // volume is restored; if not, the resume is retried.
+                    Some((
+                        State::PausedByCricket,
+                        "link to the source lost before the resume was confirmed",
+                    ))
+                } else {
+                    self.fade_updated = now;
+                    None
+                }
+            }
+        }
     }
 
     fn tick_playing(
@@ -277,6 +325,9 @@ impl<C: Clock> Engine<C> {
         }
 
         if playing {
+            // Also covers a resume that was delivered while the link was
+            // down: the volume may still be at the fade-in's zero.
+            self.restore_volume(commands);
             return Some((State::Playing, "source was resumed by the user"));
         }
         if !self.quiet_lasted(now, self.settings.resume_cooldown()) {
@@ -388,6 +439,8 @@ mod tests {
         playing: bool,
         volume: Option<f32>,
         activity: bool,
+        /// `false` simulates a lost link: no playback, no volume.
+        available: bool,
         obeys_pause: bool,
         obeys_resume: bool,
         /// Ticks before a pause or resume shows in the playback state.
@@ -411,6 +464,7 @@ mod tests {
                 playing: true,
                 volume: Some(VOLUME),
                 activity: false,
+                available: true,
                 obeys_pause: true,
                 obeys_resume: true,
                 lag_ticks: 0,
@@ -440,12 +494,13 @@ mod tests {
 
             let output = self.engine.tick(&Observation {
                 other_activity: self.activity,
-                playback: Some(if self.playing {
+                playback: self.available.then_some(if self.playing {
                     PlaybackState::Playing
                 } else {
                     PlaybackState::Paused
                 }),
-                volume: self.volume,
+                volume: if self.available { self.volume } else { None },
+                source_available: self.available,
             });
 
             for command in &output.commands {
@@ -964,6 +1019,7 @@ mod tests {
             other_activity: false,
             playback: Some(PlaybackState::Paused),
             volume: Some(VOLUME),
+            source_available: true,
         });
 
         assert_eq!(engine.state(), State::PausedByUser);
@@ -979,6 +1035,7 @@ mod tests {
             other_activity: true,
             playback: None,
             volume: None,
+            source_available: true,
         });
 
         assert_eq!(engine.state(), State::PausedByUser);
@@ -1037,5 +1094,161 @@ mod tests {
 
         assert!(sim.transitions.iter().all(|t| !t.reason.is_empty()));
         assert!(sim.transitions.iter().all(|t| t.from != t.to));
+    }
+
+    // --- A source that cannot be seen (browser tab link down) -------------
+
+    #[test]
+    fn losing_the_source_while_playing_holds_playing() {
+        let mut sim = Sim::playing();
+        sim.available = false;
+        sim.run_ms(10_000);
+
+        assert_eq!(sim.state(), State::Playing);
+        assert!(sim.commands.is_empty());
+
+        sim.available = true;
+        sim.tick();
+        assert_eq!(sim.state(), State::Playing);
+    }
+
+    #[test]
+    fn losing_the_source_while_paused_by_user_holds_it() {
+        let mut sim = Sim::playing();
+        sim.playing = false;
+        sim.run_until(State::PausedByUser);
+        sim.available = false;
+        sim.run_ms(5_000);
+        assert_eq!(sim.state(), State::PausedByUser);
+
+        // Coming back playing is still picked up.
+        sim.available = true;
+        sim.playing = true;
+        sim.tick();
+        assert_eq!(sim.state(), State::Playing);
+    }
+
+    #[test]
+    fn a_link_lost_while_paused_by_cricket_does_not_become_paused_by_user() {
+        let mut sim = Sim::playing();
+        sim.pause_by_activity();
+        sim.available = false;
+        sim.activity = false;
+        sim.run_ms(20_000);
+
+        assert_eq!(sim.state(), State::PausedByCricket);
+        assert_eq!(sim.count(Command::Resume), 0);
+
+        // Back and still paused: Cricket resumes after a fresh cooldown.
+        sim.available = true;
+        sim.run_until(State::Playing);
+        assert_eq!(sim.count(Command::Resume), 1);
+        assert_eq!(sim.volume, Some(VOLUME));
+    }
+
+    #[test]
+    fn time_without_a_link_does_not_count_toward_the_resume_cooldown() {
+        let mut sim = Sim::playing();
+        sim.pause_by_activity();
+        sim.activity = false;
+        sim.run_ms(2_000); // most of the 3 s cooldown
+        sim.available = false;
+        sim.run_ms(10_000);
+        sim.available = true;
+        sim.run_ms(2_000);
+
+        assert_eq!(sim.state(), State::PausedByCricket);
+        sim.run_until(State::FadingIn);
+    }
+
+    #[test]
+    fn the_user_resuming_while_the_link_was_down_is_noticed_afterwards() {
+        let mut sim = Sim::playing();
+        sim.pause_by_activity();
+        sim.available = false;
+        sim.run_ms(5_000);
+        sim.playing = true; // the user pressed play meanwhile
+        sim.available = true;
+        sim.tick();
+
+        assert_eq!(sim.state(), State::Playing);
+    }
+
+    #[test]
+    fn a_link_lost_during_fade_out_resumes_the_fade_without_a_jump() {
+        let mut sim = Sim::playing();
+        sim.activity = true;
+        sim.run_until(State::FadingOut);
+        sim.run_ms(500);
+        let before = sim.volumes().len();
+        sim.available = false;
+        sim.run_ms(30_000);
+
+        assert_eq!(sim.state(), State::FadingOut);
+        assert_eq!(sim.volumes().len(), before);
+
+        sim.available = true;
+        sim.tick();
+        let level = *sim.volumes().last().unwrap();
+        // 30 s of blindness must not have skipped the fade to the end.
+        assert!(level > 0.1, "volume jumped to {level}");
+        assert_eq!(sim.state(), State::FadingOut);
+    }
+
+    #[test]
+    fn a_link_lost_while_a_resume_is_unconfirmed_falls_back_to_paused_by_cricket() {
+        let mut sim = Sim::playing();
+        sim.pause_by_activity();
+        sim.activity = false;
+        sim.lag_ticks = 20;
+        sim.run_until(State::FadingIn);
+        sim.available = false;
+        sim.tick();
+
+        assert_eq!(sim.state(), State::PausedByCricket);
+    }
+
+    #[test]
+    fn a_resume_delivered_during_the_blackout_gets_its_volume_back() {
+        let mut sim = Sim::playing();
+        sim.pause_by_activity();
+        sim.activity = false;
+        sim.lag_ticks = 20;
+        sim.run_until(State::FadingIn);
+        // The resume lands and the volume sits at 0 from the fade-in, then
+        // the link drops before the engine saw it.
+        sim.available = false;
+        sim.run_ms(3_000);
+        assert_eq!(sim.state(), State::PausedByCricket);
+        sim.available = true;
+        sim.run_until(State::Playing);
+        sim.run_ms(3_000);
+
+        assert_eq!(sim.state(), State::Playing);
+        assert_eq!(sim.volume, Some(VOLUME));
+    }
+
+    #[test]
+    fn disabling_works_while_the_source_is_unavailable() {
+        let mut sim = Sim::playing();
+        sim.available = false;
+        sim.engine.set_enabled(false);
+        sim.tick();
+        assert_eq!(sim.state(), State::Idle);
+    }
+
+    #[test]
+    fn a_source_that_is_not_available_at_start_waits_in_idle() {
+        let mut sim = Sim::playing();
+        sim.engine.set_enabled(false);
+        sim.tick();
+        sim.available = false;
+        sim.engine.set_enabled(true);
+        sim.run_ms(1_000);
+        assert_eq!(sim.state(), State::Idle);
+
+        sim.available = true;
+        sim.tick();
+        assert_eq!(sim.state(), State::Playing);
     }
 }
