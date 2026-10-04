@@ -141,8 +141,24 @@ function unavailableText(status: Status): { headline: string; detail: string } {
         "The browser was restarted, so Cricket cannot tell which tab it was. Pick the tab under Music source.",
     };
   }
+  const source = status.source;
+  // A tab id is never handed out again within one browser run, so a tab
+  // that is missing from the list is gone for good: reopening it gives it a
+  // new id. The list is empty for a moment after connecting, hence the
+  // length check.
+  const closed =
+    status.bridge.connected &&
+    source?.kind === "tab" &&
+    status.tabs.length > 0 &&
+    !status.tabs.some((tab) => tab.id === source.id);
+  if (closed) {
+    return {
+      headline: "The music tab was closed",
+      detail: "A reopened tab counts as a new one. Pick the tab again under Music source.",
+    };
+  }
   const reason = status.bridge.connected
-    ? "The tab is closed, or needs a reload so the extension can reach its player."
+    ? "The tab is not reporting yet. If this lasts, reload the tab."
     : "The browser extension is not connected.";
   const held =
     status.state === "PausedByCricket" || status.state === "FadingIn"
