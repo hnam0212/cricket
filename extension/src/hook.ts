@@ -22,7 +22,9 @@
   const REPORT_INTERVAL_MS = 250;
   /** The extension re-arms the source tab every few seconds. Without that
    *  for this long, the tab is no longer the source and stops reporting. */
-  const ARM_TIMEOUT_MS = 10_000;
+  const ARM_TIMEOUT_MS = 5_000;
+  /** Two volumes closer than this count as the same. */
+  const VOLUME_EPSILON = 0.005;
   /** Time the page's own handler gets before the direct fallback is used. */
   const HANDLER_GRACE_MS = 200;
 
@@ -121,11 +123,40 @@
     );
   };
 
+  // Volume changes made on behalf of Cricket. If the app dies, or the link
+  // drops mid-fade, nobody would ever put the volume back and the page would
+  // stay quiet. So the volume before the first change is remembered and
+  // restored whenever this tab stops being the source.
+  interface VolumeRecord {
+    original: number;
+    lastSet: number;
+  }
+  const changed = new WeakMap<HTMLMediaElement, VolumeRecord>();
+
   const setVolume = (volume: number) => {
     const level = Math.min(Math.max(volume, 0), 1);
     for (const element of elements()) {
-      if (audible(element) && (isPlaying(element) || pausedByCricket.includes(element))) {
-        element.volume = level;
+      if (!audible(element) || !(isPlaying(element) || pausedByCricket.includes(element))) {
+        continue;
+      }
+      const record = changed.get(element) ?? { original: element.volume, lastSet: level };
+      record.lastSet = level;
+      element.volume = level;
+      // Back at the starting level: the fade is over, nothing to undo.
+      if (Math.abs(level - record.original) < VOLUME_EPSILON) changed.delete(element);
+      else changed.set(element, record);
+    }
+  };
+
+  const restoreVolumes = () => {
+    for (const element of elements()) {
+      const record = changed.get(element);
+      if (!record) continue;
+      changed.delete(element);
+      // Only if the volume is still what Cricket set: if the user or the page
+      // changed it since, that choice stands.
+      if (Math.abs(element.volume - record.lastSet) < VOLUME_EPSILON) {
+        element.volume = record.original;
       }
     }
   };
@@ -152,6 +183,7 @@
   const disarm = () => {
     window.clearInterval(timer);
     timer = undefined;
+    restoreVolumes();
   };
 
   const arm = () => {
@@ -163,6 +195,9 @@
     }, REPORT_INTERVAL_MS);
     report();
   };
+
+  // A page that is being left or frozen cannot be told to restore later.
+  window.addEventListener("pagehide", restoreVolumes);
 
   document.addEventListener(TO_PAGE, (event) => {
     let message: { arm?: boolean; cmd?: string; volume?: number };

@@ -2,6 +2,7 @@
 //! reached through a [`TabBridge`] (the browser extension).
 
 use std::fmt;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -125,6 +126,11 @@ pub trait TabBridge {
     fn set_volume(&mut self, tab: TabId, volume: f32) -> BackendResult<()>;
     fn pause(&mut self, tab: TabId) -> BackendResult<()>;
     fn play(&mut self, tab: TabId) -> BackendResult<()>;
+
+    /// Waits, for at most `timeout`, until queued commands have been handed
+    /// to the extension. Called on shutdown so a last "restore the volume"
+    /// is not lost. A bridge with nothing queued returns at once.
+    fn flush(&mut self, _timeout: Duration) {}
 }
 
 /// A bridge with no browser behind it, for when only desktop apps can be a

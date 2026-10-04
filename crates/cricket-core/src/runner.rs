@@ -4,12 +4,17 @@
 //! The engine itself stays free of I/O; all of it happens here, through the
 //! backend traits. The caller owns the loop and the sleeping.
 
+use std::time::Duration;
+
 use crate::activity::{detect_activity, detect_tab_activity, ActivityCause};
 use crate::audio::{ActivitySnapshot, AudioBackend, BackendError, MediaController, PlaybackState};
 use crate::clock::Clock;
 use crate::engine::{Command, Engine, Observation, State, TickOutput};
 use crate::settings::Settings;
 use crate::source::{Source, TabBridge, TabInfo};
+
+/// How long shutdown waits for the last commands to reach the browser.
+const SHUTDOWN_FLUSH: Duration = Duration::from_millis(300);
 
 /// Everything that happened in one step, for logs and diagnostics.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -108,7 +113,10 @@ impl<A: AudioBackend, M: MediaController, B: TabBridge, C: Clock + Clone> Runner
 
     /// Call before exiting, so the source is not left with a lowered volume.
     pub fn shutdown(&mut self) -> Vec<String> {
-        self.set_source(None)
+        let errors = self.set_source(None);
+        // The restore commands only reach a browser tab through a queue.
+        self.tabs.flush(SHUTDOWN_FLUSH);
+        errors
     }
 
     fn hand_back(&mut self) -> Vec<String> {
