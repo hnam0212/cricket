@@ -32,11 +32,12 @@ USAGE:
       Print the app's session volume, or set it (0.0 to 1.0).
 
   cricket-probe fade <app> <level> [--ms 2500]
-      Fade the app's session volume to a level (0.0 to 1.0).
+      Fade the app's session volume to a level (0.0 to 1.0). The volume
+      stays there until you change it; Windows remembers it per app.
 
   cricket-probe cycle <app> [--fade-out-ms 2500] [--hold-ms 3000] [--fade-in-ms 1500]
-      What Cricket will do: fade out, pause, wait, resume, fade back in to
-      the original volume.
+      What Cricket will do: fade out, pause, restore the volume while paused,
+      wait, then resume from zero and fade back in to the original volume.
 
 <app> is an executable name as shown by `list`, for example spotify.exe.
 ";
@@ -358,6 +359,19 @@ fn resume(log: &Log, app: &AppId) -> CliResult {
     text(controller.play(app))?;
     log.line("resume accepted");
     settle_and_log(log, &mut controller, app, "after resume");
+
+    // `resume` only presses play. Point out a volume left low by an earlier
+    // `fade`, because the music is then playing but inaudible.
+    if let Ok(mut backend) = WinAudioBackend::new() {
+        if let Ok(volume) = backend.volume(app) {
+            if volume < 0.05 {
+                log.line(&format!(
+                    "NOTE {app} volume is {volume:.3}, so it will be silent. \
+                     Restore it with: cricket-probe volume {app} 1.0"
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -472,12 +486,20 @@ fn cycle_steps(
     log.line("pause accepted");
     settle_and_log(log, controller, app, "after pause");
 
+    // Put the volume back as soon as the music is paused. Windows remembers
+    // session volume per app, so if we stopped here (crash, Ctrl+C, or the
+    // user resuming by hand) the app would otherwise stay muted.
+    text(backend.set_volume(app, original))?;
+    log.line(&format!("volume restored to {original:.3} while paused"));
+
     log.line(&format!("holding for {} ms", hold.as_millis()));
     sleep(hold);
 
+    // Drop to zero only at the moment of resuming, then fade in.
+    text(backend.set_volume(app, 0.0))?;
     text(controller.play(app))?;
     log.line("resume accepted");
-    settle_and_log(log, controller, app, "after resume");
-
-    fade(log, backend, app, 0.0, original, fade_in)
+    fade(log, backend, app, 0.0, original, fade_in)?;
+    log_playback(log, controller, app, "after resume");
+    Ok(())
 }
