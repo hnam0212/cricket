@@ -1,0 +1,17 @@
+[package]
+name = "cricket"
+description = "Keeps background music playing while the machine is quiet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "cricket_app"
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[dependencies]
+cricket-core.workspace = true
+tauri = { version = "2.12.1", features = [] }
