@@ -7,6 +7,7 @@ pub mod audio;
 pub mod clock;
 pub mod engine;
 pub mod fade;
+pub mod runner;
 pub mod settings;
 
 /// Version of the core crate, shown in the UI so we can tell the web side is

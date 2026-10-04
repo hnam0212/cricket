@@ -47,7 +47,7 @@ Transitions:
 - `FadingOut` to `PausedByCricket`: fade finished, pause command sent.
 - `PausedByCricket` to `FadingIn`: no activity for at least the resume cooldown. Resume command sent, volume ramps up.
 - `FadingIn` to `Playing`: fade finished.
-- `FadingOut` or `FadingIn` back to the opposite direction if activity changes mid-fade (reverse smoothly from current volume, no jumps).
+- `FadingOut` or `FadingIn` back to the opposite direction if activity changes mid-fade (reverse smoothly from current volume, no jumps). The change must last the trigger delay before the fade reverses, so short gaps or blips do not make the volume wobble.
 - Any state to `PausedByUser`: the source stops by itself without a Cricket command. Return to `Playing` only when the source starts playing again.
 - Restore the source's original volume after every resume.
 - Never leave the source muted. The OS remembers per-app volume, so the volume is put back to the original as soon as the pause has taken effect, and is dropped to zero again only at the moment of resuming, just before the fade in. If Cricket exits or the user resumes by hand while paused, the music is audible.
@@ -126,8 +126,8 @@ Each phase ends with a manual test checklist for the user. Do not start the next
 - [x] Manual test: user runs it with Spotify, a game or video, Zoom or any mic app, and confirms the readings make sense.
 
 ### Phase 2: Engine
-- [ ] Pure state machine with fake clock; unit tests for every scenario in section 4 and every transition in 5.2, including mid-fade reversal and the user-pause rule.
-- [ ] Wire engine to the Windows backend in a headless run mode with detailed logs.
+- [x] Pure state machine with fake clock; unit tests for every scenario in section 4 and every transition in 5.2, including mid-fade reversal and the user-pause rule.
+- [x] Wire engine to the Windows backend in a headless run mode with detailed logs.
 - [ ] Manual test: scenario 3 end to end (app source) in the headless mode.
 
 ### Phase 3: UI

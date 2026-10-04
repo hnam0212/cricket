@@ -5,6 +5,8 @@
 //! backend reports matches what they hear, and paste the log back.
 
 #[cfg(windows)]
+mod headless;
+#[cfg(windows)]
 mod probe;
 
 #[cfg(windows)]

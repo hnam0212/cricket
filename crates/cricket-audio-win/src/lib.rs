@@ -14,6 +14,8 @@ mod com;
 #[cfg(windows)]
 mod sessions;
 #[cfg(windows)]
+pub mod shutdown;
+#[cfg(windows)]
 mod smtc;
 
 #[cfg(windows)]

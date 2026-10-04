@@ -8,6 +8,9 @@ use cricket_core::audio::{
     ActivitySnapshot, AppActivity, AppId, AudioBackend, BackendResult, MediaController,
 };
 use cricket_core::fade::fade_level;
+use cricket_core::settings::Settings;
+
+use crate::headless;
 
 const USAGE: &str = "\
 cricket-probe: inspect and control Windows audio sessions
@@ -41,11 +44,20 @@ USAGE:
   cricket-probe cycle <app> [--fade-out-ms 2500] [--hold-ms 3000] [--fade-in-ms 1500]
       Pause, wait, resume: the two commands above with a hold in between.
 
+  cricket-probe run <app> [--trigger-ms 500] [--cooldown-ms 3000]
+                          [--fade-out-ms 2500] [--fade-in-ms 1500]
+                          [--threshold 0.02] [--mic on|off] [--system-sounds on|off]
+      Cricket without the UI: keeps <app> playing while the machine is
+      quiet, fades it out and pauses it when anything else makes sound or
+      the microphone is in use, and brings it back after the cooldown.
+      Logs every decision. --system-sounds on makes Windows notification
+      sounds count as activity. Stop with Ctrl+C.
+
 <app> is an executable name as shown by `list`, for example spotify.exe.
 ";
 
 /// Matches the engine's planned polling rate (CLAUDE.md, architecture rule 6).
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
+pub const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const FADE_STEP: Duration = Duration::from_millis(20);
 const FADE_LOG_INTERVAL: Duration = Duration::from_millis(250);
 /// Defaults from SPEC.md section 5.3.
@@ -55,7 +67,7 @@ const DEFAULT_FADE_IN_MS: f64 = 1500.0;
 const QUIET_VOLUME: f32 = 0.05;
 const BAR_WIDTH: usize = 20;
 
-type CliResult = Result<(), String>;
+pub type CliResult = Result<(), String>;
 
 pub fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -114,6 +126,23 @@ fn run(args: &[String]) -> CliResult {
             Duration::from_millis(args.number("hold-ms", 3000.0)? as u64),
             Duration::from_millis(args.number("fade-in-ms", DEFAULT_FADE_IN_MS)? as u64),
         ),
+        "run" => {
+            let defaults = Settings::default();
+            let settings = Settings {
+                trigger_delay_ms: args.number("trigger-ms", defaults.trigger_delay_ms as f64)?
+                    as u64,
+                resume_cooldown_ms: args
+                    .number("cooldown-ms", defaults.resume_cooldown_ms as f64)?
+                    as u64,
+                fade_out_ms: args.number("fade-out-ms", defaults.fade_out_ms as f64)? as u64,
+                fade_in_ms: args.number("fade-in-ms", defaults.fade_in_ms as f64)? as u64,
+                sound_threshold: args.number("threshold", defaults.sound_threshold as f64)? as f32,
+                mic_counts_as_activity: args.switch("mic", defaults.mic_counts_as_activity)?,
+                ignore_system_sounds: !args
+                    .switch("system-sounds", !defaults.ignore_system_sounds)?,
+            };
+            headless::run(&log, &args.app()?, settings)
+        }
         "help" | "--help" | "-h" => {
             print!("{USAGE}");
             Ok(())
@@ -158,6 +187,15 @@ impl Args {
             .ok_or_else(|| "this command needs an app name, for example spotify.exe".to_string())
     }
 
+    fn switch(&self, name: &str, default: bool) -> Result<bool, String> {
+        match self.options.get(name).map(String::as_str) {
+            None => Ok(default),
+            Some("on") => Ok(true),
+            Some("off") => Ok(false),
+            Some(other) => Err(format!("--{name} must be on or off, got `{other}`")),
+        }
+    }
+
     fn number(&self, name: &str, default: f64) -> Result<f64, String> {
         match self.options.get(name) {
             None => Ok(default),
@@ -179,7 +217,7 @@ fn parse_level(text: &str) -> Result<f32, String> {
 
 /// Prints lines prefixed with the time since the probe started, so pasted
 /// logs show how long things took.
-struct Log {
+pub struct Log {
     started: Instant,
 }
 
@@ -190,12 +228,12 @@ impl Log {
         }
     }
 
-    fn line(&self, message: &str) {
+    pub fn line(&self, message: &str) {
         println!("[{:>8.3}s] {message}", self.started.elapsed().as_secs_f64());
     }
 }
 
-fn text<T>(result: BackendResult<T>) -> Result<T, String> {
+pub fn text<T>(result: BackendResult<T>) -> Result<T, String> {
     result.map_err(|error| error.to_string())
 }
 

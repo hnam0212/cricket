@@ -4,7 +4,7 @@ Cricket keeps your background music playing while the machine is quiet, and fade
 
 The music source can be a desktop app (such as Spotify) or one specific Chrome tab. Windows first, macOS later.
 
-Status: Phase 1 (Windows audio probe). The app window is still a scaffold; the Windows audio backend exists and can be exercised through a debug CLI. See `SPEC.md` for the product spec and the phase plan, and `CLAUDE.md` for the architecture rules.
+Status: Phase 2 (engine). The app window is still a scaffold; the engine and the Windows audio backend exist and run headless through a debug CLI. See `SPEC.md` for the product spec and the phase plan, and `CLAUDE.md` for the architecture rules.
 
 ## Prerequisites (Windows)
 
@@ -57,9 +57,10 @@ pnpm tauri build
 cargo run -p cricket-audio-win --bin cricket-probe -- list
 cargo run -p cricket-audio-win --bin cricket-probe -- watch
 cargo run -p cricket-audio-win --bin cricket-probe -- cycle spotify.exe
+cargo run -p cricket-audio-win --bin cricket-probe -- run spotify.exe
 ```
 
-Run it without a command to see every command and option.
+`run` is Cricket without the UI: it keeps the chosen app playing while the machine is quiet and pauses it when anything else makes sound. Run the probe without a command to see every command and option.
 
 ## Checks
 
