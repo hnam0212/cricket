@@ -24,20 +24,22 @@ USAGE:
   cricket-probe status <app>
       Volume and playback state of one app.
 
-  cricket-probe pause <app>
-  cricket-probe resume <app>
-      Pause or resume through the system media controls (SMTC).
+  cricket-probe pause <app> [--fade-ms 2500]
+  cricket-probe fade <app> [--fade-ms 2500]
+      Fade the app's volume down to silence, then pause it through the
+      system media controls (SMTC). The volume is put back once the app is
+      paused, so it is not left muted. `fade` and `pause` are the same.
+      Use --fade-ms 0 to pause at once.
+
+  cricket-probe resume <app> [--fade-ms 1500]
+      Resume from silence and fade the volume back up.
+      Use --fade-ms 0 to resume at once.
 
   cricket-probe volume <app> [level]
       Print the app's session volume, or set it (0.0 to 1.0).
 
-  cricket-probe fade <app> <level> [--ms 2500]
-      Fade the app's session volume to a level (0.0 to 1.0). The volume
-      stays there until you change it; Windows remembers it per app.
-
   cricket-probe cycle <app> [--fade-out-ms 2500] [--hold-ms 3000] [--fade-in-ms 1500]
-      What Cricket will do: fade out, pause, restore the volume while paused,
-      wait, then resume from zero and fade back in to the original volume.
+      Pause, wait, resume: the two commands above with a hold in between.
 
 <app> is an executable name as shown by `list`, for example spotify.exe.
 ";
@@ -49,6 +51,8 @@ const FADE_LOG_INTERVAL: Duration = Duration::from_millis(250);
 /// Defaults from SPEC.md section 5.3.
 const DEFAULT_FADE_OUT_MS: f64 = 2500.0;
 const DEFAULT_FADE_IN_MS: f64 = 1500.0;
+/// Below this a session volume counts as "left muted by accident".
+const QUIET_VOLUME: f32 = 0.05;
 const BAR_WIDTH: usize = 20;
 
 type CliResult = Result<(), String>;
@@ -80,24 +84,29 @@ fn run(args: &[String]) -> CliResult {
             args.number("threshold", 0.02)? as f32,
         ),
         "status" => status(&log, &args.app()?),
-        "pause" => pause(&log, &args.app()?),
-        "resume" => resume(&log, &args.app()?),
+        // `fade` is the same action under the name used in conversation.
+        "pause" | "fade" => {
+            if args.positional.len() > 2 {
+                return Err(format!(
+                    "{command} takes only an app name; it always fades to silence and pauses. \
+                     To set a volume level use: cricket-probe volume <app> <level>"
+                ));
+            }
+            pause(
+                &log,
+                &args.app()?,
+                Duration::from_millis(args.number("fade-ms", DEFAULT_FADE_OUT_MS)? as u64),
+            )
+        }
+        "resume" => resume(
+            &log,
+            &args.app()?,
+            Duration::from_millis(args.number("fade-ms", DEFAULT_FADE_IN_MS)? as u64),
+        ),
         "volume" => match args.positional.get(2) {
             None => status(&log, &args.app()?),
             Some(level) => set_volume(&log, &args.app()?, parse_level(level)?),
         },
-        "fade" => {
-            let level = args
-                .positional
-                .get(2)
-                .ok_or("fade needs a target level, for example: fade spotify.exe 0.2")?;
-            fade_command(
-                &log,
-                &args.app()?,
-                parse_level(level)?,
-                Duration::from_millis(args.number("ms", DEFAULT_FADE_OUT_MS)? as u64),
-            )
-        }
         "cycle" => cycle(
             &log,
             &args.app()?,
@@ -344,35 +353,90 @@ fn status(log: &Log, app: &AppId) -> CliResult {
     Ok(())
 }
 
-fn pause(log: &Log, app: &AppId) -> CliResult {
+fn pause(log: &Log, app: &AppId, fade_out: Duration) -> CliResult {
+    let mut backend = text(WinAudioBackend::new())?;
     let mut controller = text(SmtcController::new())?;
+    let original = text(backend.volume(app))?;
+    log.line(&format!("{app} volume: {original:.3}"));
     log_playback(log, &mut controller, app, "before pause");
-    text(controller.pause(app))?;
-    log.line("pause accepted");
-    settle_and_log(log, &mut controller, app, "after pause");
-    Ok(())
+    fade_out_and_pause(log, &mut backend, &mut controller, app, original, fade_out)
 }
 
-fn resume(log: &Log, app: &AppId) -> CliResult {
+fn resume(log: &Log, app: &AppId, fade_in: Duration) -> CliResult {
+    let mut backend = text(WinAudioBackend::new())?;
     let mut controller = text(SmtcController::new())?;
+    let mut target = text(backend.volume(app))?;
+    if target < QUIET_VOLUME {
+        // Left over from an earlier run or the Windows mixer. Fading in to
+        // it would produce music nobody can hear.
+        log.line(&format!(
+            "NOTE {app} volume was {target:.3}; fading in to 1.000 instead"
+        ));
+        target = 1.0;
+    }
     log_playback(log, &mut controller, app, "before resume");
-    text(controller.play(app))?;
-    log.line("resume accepted");
-    settle_and_log(log, &mut controller, app, "after resume");
+    resume_and_fade_in(log, &mut backend, &mut controller, app, target, fade_in)
+}
 
-    // `resume` only presses play. Point out a volume left low by an earlier
-    // `fade`, because the music is then playing but inaudible.
-    if let Ok(mut backend) = WinAudioBackend::new() {
-        if let Ok(volume) = backend.volume(app) {
-            if volume < 0.05 {
-                log.line(&format!(
-                    "NOTE {app} volume is {volume:.3}, so it will be silent. \
-                     Restore it with: cricket-probe volume {app} 1.0"
-                ));
-            }
+/// Fades to silence, pauses, then puts the volume back.
+fn fade_out_and_pause(
+    log: &Log,
+    backend: &mut WinAudioBackend,
+    controller: &mut SmtcController,
+    app: &AppId,
+    original: f32,
+    fade_out: Duration,
+) -> CliResult {
+    let result = (|| {
+        if !fade_out.is_zero() {
+            fade(log, backend, app, original, 0.0, fade_out)?;
+        }
+        text(controller.pause(app))?;
+        log.line("pause accepted");
+        settle_and_log(log, controller, app, "after pause");
+        Ok(())
+    })();
+
+    // Put the volume back as soon as the music is paused, and also when a
+    // step failed. Windows remembers session volume per app, so a muted
+    // source would stay muted if Cricket exited or the user resumed by hand.
+    match backend.set_volume(app, original) {
+        Ok(()) => log.line(&format!("volume restored to {original:.3} while paused")),
+        Err(error) => log.line(&format!("could not restore volume: {error}")),
+    }
+    result
+}
+
+/// Resumes from silence and fades up to `target`.
+fn resume_and_fade_in(
+    log: &Log,
+    backend: &mut WinAudioBackend,
+    controller: &mut SmtcController,
+    app: &AppId,
+    target: f32,
+    fade_in: Duration,
+) -> CliResult {
+    let result = (|| {
+        if !fade_in.is_zero() {
+            // Drop to zero only at the moment of resuming.
+            text(backend.set_volume(app, 0.0))?;
+        }
+        text(controller.play(app))?;
+        log.line("resume accepted");
+        if !fade_in.is_zero() {
+            fade(log, backend, app, 0.0, target, fade_in)?;
+        }
+        Ok(())
+    })();
+
+    if result.is_err() {
+        match backend.set_volume(app, target) {
+            Ok(()) => log.line(&format!("restored volume to {target:.3} after failure")),
+            Err(error) => log.line(&format!("could not restore volume: {error}")),
         }
     }
-    Ok(())
+    log_playback(log, controller, app, "after resume");
+    result
 }
 
 fn log_playback(log: &Log, controller: &mut SmtcController, app: &AppId, label: &str) {
@@ -395,15 +459,6 @@ fn set_volume(log: &Log, app: &AppId, level: f32) -> CliResult {
     let after = text(backend.volume(app))?;
     log.line(&format!("{app} volume: {before:.3} -> {after:.3}"));
     Ok(())
-}
-
-fn fade_command(log: &Log, app: &AppId, target: f32, duration: Duration) -> CliResult {
-    let mut backend = text(WinAudioBackend::new())?;
-    let from = text(backend.volume(app))?;
-    log.line(&format!(
-        "{app} volume is {from:.3}. To undo: cricket-probe volume {app} {from:.3}"
-    ));
-    fade(log, &mut backend, app, from, target, duration)
 }
 
 fn fade(
@@ -454,52 +509,10 @@ fn cycle(
     ));
     log_playback(log, &mut controller, app, "at start");
 
-    let result = cycle_steps(
-        log,
-        &mut backend,
-        &mut controller,
-        app,
-        original,
-        (fade_out, hold, fade_in),
-    );
-    if result.is_err() {
-        // Never leave the user's music silenced because a step failed.
-        match backend.set_volume(app, original) {
-            Ok(()) => log.line(&format!("restored volume to {original:.3} after failure")),
-            Err(error) => log.line(&format!("could not restore volume: {error}")),
-        }
-    }
-    result
-}
-
-fn cycle_steps(
-    log: &Log,
-    backend: &mut WinAudioBackend,
-    controller: &mut SmtcController,
-    app: &AppId,
-    original: f32,
-    (fade_out, hold, fade_in): (Duration, Duration, Duration),
-) -> CliResult {
-    fade(log, backend, app, original, 0.0, fade_out)?;
-
-    text(controller.pause(app))?;
-    log.line("pause accepted");
-    settle_and_log(log, controller, app, "after pause");
-
-    // Put the volume back as soon as the music is paused. Windows remembers
-    // session volume per app, so if we stopped here (crash, Ctrl+C, or the
-    // user resuming by hand) the app would otherwise stay muted.
-    text(backend.set_volume(app, original))?;
-    log.line(&format!("volume restored to {original:.3} while paused"));
+    fade_out_and_pause(log, &mut backend, &mut controller, app, original, fade_out)?;
 
     log.line(&format!("holding for {} ms", hold.as_millis()));
     sleep(hold);
 
-    // Drop to zero only at the moment of resuming, then fade in.
-    text(backend.set_volume(app, 0.0))?;
-    text(controller.play(app))?;
-    log.line("resume accepted");
-    fade(log, backend, app, 0.0, original, fade_in)?;
-    log_playback(log, controller, app, "after resume");
-    Ok(())
+    resume_and_fade_in(log, &mut backend, &mut controller, app, original, fade_in)
 }

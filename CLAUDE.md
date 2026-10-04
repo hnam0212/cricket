@@ -46,7 +46,7 @@ Keep these current. Run them from the repo root.
 - Lint: `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`
 - UI checks: `pnpm -C ui lint` and `pnpm -C ui typecheck`
 - UI build: `pnpm -C ui build`
-- Audio probe (debug CLI): `cargo run -p cricket-audio-win --bin cricket-probe -- <command>`. Commands: `list`, `watch`, `status <app>`, `pause <app>`, `resume <app>`, `volume <app> [level]`, `fade <app> <level>`, `cycle <app>`. Run it with no command for full usage.
+- Audio probe (debug CLI): `cargo run -p cricket-audio-win --bin cricket-probe -- <command>`. Commands: `list`, `watch`, `status <app>`, `pause <app>` (alias `fade <app>`: fade to silence, then pause), `resume <app>` (resume, then fade in), `volume <app> [level]`, `cycle <app>`. Run it with no command for full usage.
 
 The Tauri crate embeds `ui/dist` at compile time. On a fresh clone, run `pnpm -C ui build` before any cargo command that compiles `src-tauri`.
 
