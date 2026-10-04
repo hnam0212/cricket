@@ -4,7 +4,7 @@ Cricket keeps your background music playing while the machine is quiet, and fade
 
 The music source can be a desktop app (such as Spotify) or one specific Chrome tab. Windows first, macOS later.
 
-Status: Phase 2 (engine). The app window is still a scaffold; the engine and the Windows audio backend exist and run headless through a debug CLI. See `SPEC.md` for the product spec and the phase plan, and `CLAUDE.md` for the architecture rules.
+Status: Phase 3 (UI). The Windows app works for desktop-app music sources: pick the source, and Cricket pauses and resumes it. Chrome tab sources come next. See `SPEC.md` for the product spec and the phase plan, and `CLAUDE.md` for the architecture rules.
 
 ## Prerequisites (Windows)
 

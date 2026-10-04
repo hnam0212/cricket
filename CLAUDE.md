@@ -41,11 +41,12 @@ Keep these current. Run them from the repo root.
 
 - Install JS deps: `pnpm install`
 - Dev: `pnpm tauri dev` (Vite on `http://127.0.0.1:1420`, then the app window)
-- Release build: `pnpm tauri build`
+- Release build: `pnpm tauri build` (installers), or `pnpm tauri build --no-bundle` for just `target\release\cricket.exe`
 - Tests: `cargo test --workspace`
 - Lint: `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`
 - UI checks: `pnpm -C ui lint` and `pnpm -C ui typecheck`
 - UI build: `pnpm -C ui build`
+- Saved configuration: `%APPDATA%\com.hnam0212.cricket\config.json` (delete it to reset). In `pnpm tauri dev` the engine's event log is also printed to the terminal.
 - Audio probe (debug CLI): `cargo run -p cricket-audio-win --bin cricket-probe -- <command>`. Commands: `list`, `watch`, `status <app>`, `pause <app>` (alias `fade <app>`: fade to silence, then pause), `resume <app>` (resume, then fade in), `volume <app> [level]`, `cycle <app>`, `run <app>` (headless mode: the engine driving the real backends, logging every decision). Run it with no command for full usage.
 
 The Tauri crate embeds `ui/dist` at compile time. On a fresh clone, run `pnpm -C ui build` before any cargo command that compiles `src-tauri`.

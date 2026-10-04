@@ -63,7 +63,7 @@ Transitions:
 | Sound threshold | peak 0.02 (about -34 dBFS) | Below this counts as silence |
 | Treat microphone use as activity | On | Active capture session counts as activity |
 | Ignore system sounds | On | Windows notification sounds do not trigger |
-| Start with Windows / minimize to tray | Off / On | Standard app behavior |
+| Start with Windows / minimize to tray | Off / On | Standard app behavior ("start with Windows" arrives in Phase 6) |
 
 ### 5.4 UI
 
@@ -131,7 +131,7 @@ Each phase ends with a manual test checklist for the user. Do not start the next
 - [x] Manual test: scenario 3 end to end (app source) in the headless mode.
 
 ### Phase 3: UI
-- [ ] Source picker, on/off, status, settings panel, tray, mini mode, persistence, diagnostics view.
+- [x] Source picker, on/off, status, settings panel, tray, mini mode, persistence, diagnostics view.
 - [ ] Manual test: scenarios 3, 4, 5 through the real UI.
 
 ### Phase 4: Chrome extension
