@@ -57,7 +57,7 @@ Transitions:
 |---|---|---|
 | Trigger delay | 500 ms | How long other sound must last before pausing |
 | Resume cooldown | 3000 ms | Continuous silence required before resuming |
-| Fade out | 800 ms | Fade to zero before pause (0 means pause immediately) |
+| Fade out | 2500 ms | Fade to zero before pause (0 means pause immediately) |
 | Fade in | 1500 ms | Fade up after resume |
 | Sound threshold | peak 0.02 (about -34 dBFS) | Below this counts as silence |
 | Treat microphone use as activity | On | Active capture session counts as activity |

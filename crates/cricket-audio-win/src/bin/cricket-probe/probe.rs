@@ -7,6 +7,7 @@ use cricket_audio_win::{SmtcController, WinAudioBackend};
 use cricket_core::audio::{
     ActivitySnapshot, AppActivity, AppId, AudioBackend, BackendResult, MediaController,
 };
+use cricket_core::fade::fade_level;
 
 const USAGE: &str = "\
 cricket-probe: inspect and control Windows audio sessions
@@ -30,10 +31,10 @@ USAGE:
   cricket-probe volume <app> [level]
       Print the app's session volume, or set it (0.0 to 1.0).
 
-  cricket-probe fade <app> <level> [--ms 800]
+  cricket-probe fade <app> <level> [--ms 2500]
       Fade the app's session volume to a level (0.0 to 1.0).
 
-  cricket-probe cycle <app> [--fade-out-ms 800] [--hold-ms 3000] [--fade-in-ms 1500]
+  cricket-probe cycle <app> [--fade-out-ms 2500] [--hold-ms 3000] [--fade-in-ms 1500]
       What Cricket will do: fade out, pause, wait, resume, fade back in to
       the original volume.
 
@@ -43,6 +44,10 @@ USAGE:
 /// Matches the engine's planned polling rate (CLAUDE.md, architecture rule 6).
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const FADE_STEP: Duration = Duration::from_millis(20);
+const FADE_LOG_INTERVAL: Duration = Duration::from_millis(250);
+/// Defaults from SPEC.md section 5.3.
+const DEFAULT_FADE_OUT_MS: f64 = 2500.0;
+const DEFAULT_FADE_IN_MS: f64 = 1500.0;
 const BAR_WIDTH: usize = 20;
 
 type CliResult = Result<(), String>;
@@ -89,15 +94,15 @@ fn run(args: &[String]) -> CliResult {
                 &log,
                 &args.app()?,
                 parse_level(level)?,
-                Duration::from_millis(args.number("ms", 800.0)? as u64),
+                Duration::from_millis(args.number("ms", DEFAULT_FADE_OUT_MS)? as u64),
             )
         }
         "cycle" => cycle(
             &log,
             &args.app()?,
-            Duration::from_millis(args.number("fade-out-ms", 800.0)? as u64),
+            Duration::from_millis(args.number("fade-out-ms", DEFAULT_FADE_OUT_MS)? as u64),
             Duration::from_millis(args.number("hold-ms", 3000.0)? as u64),
-            Duration::from_millis(args.number("fade-in-ms", 1500.0)? as u64),
+            Duration::from_millis(args.number("fade-in-ms", DEFAULT_FADE_IN_MS)? as u64),
         ),
         "help" | "--help" | "-h" => {
             print!("{USAGE}");
@@ -400,9 +405,15 @@ fn fade(
         duration.as_millis()
     ));
     let steps = (duration.as_millis() / FADE_STEP.as_millis()).max(1) as u32;
+    let mut last_logged = Instant::now();
     for step in 1..=steps {
-        let level = from + (to - from) * (step as f32 / steps as f32);
+        let level = fade_level(from, to, step as f32 / steps as f32);
         text(backend.set_volume(app, level))?;
+        // A few readings along the way, so the log shows the ramp.
+        if last_logged.elapsed() >= FADE_LOG_INTERVAL && step < steps {
+            log.line(&format!("  fading: {level:.3}"));
+            last_logged = Instant::now();
+        }
         if step < steps {
             sleep(FADE_STEP);
         }

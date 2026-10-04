@@ -4,6 +4,7 @@
 //! settings land here in later phases.
 
 pub mod audio;
+pub mod fade;
 
 /// Version of the core crate, shown in the UI so we can tell the web side is
 /// really talking to the Rust side.
