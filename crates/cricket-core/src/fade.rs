@@ -10,6 +10,14 @@
 /// early and lets it tail off, which the ear hears as an even fade.
 pub fn fade_level(from: f32, to: f32, progress: f32) -> f32 {
     let progress = progress.clamp(0.0, 1.0);
+    // Exact at both ends: squaring a square root is off by a rounding
+    // error, and a fade must land precisely on the user's volume.
+    if progress <= 0.0 {
+        return from.clamp(0.0, 1.0);
+    }
+    if progress >= 1.0 {
+        return to.clamp(0.0, 1.0);
+    }
     let from = from.clamp(0.0, 1.0).sqrt();
     let to = to.clamp(0.0, 1.0).sqrt();
     let position = from + (to - from) * progress;
