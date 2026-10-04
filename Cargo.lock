@@ -420,6 +420,8 @@ name = "cricket-audio-win"
 version = "0.1.0"
 dependencies = [
  "cricket-core",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]
