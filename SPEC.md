@@ -82,8 +82,17 @@ Transitions:
 
 Protocol (JSON messages, versioned):
 
-- Extension to app: `hello {version, token}`, `tabs {tabs:[{id,title,url,audible}]}`, `source_state {tabId, playing}`
-- App to extension: `select_source {tabId}`, `command {cmd:"pause"|"resume"|"set_volume", tabId, volume?, fadeMs?}`
+- Extension to app: `hello {version, token, browser?}`, `tabs {tabs:[{id,title,url,audible}]}`, `source_state {tabId, playing, volume?}`, `ping {}`
+- App to extension: `hello_ack {ok, error?}`, `select_source {tabId|null}`, `command {cmd:"pause"|"resume"|"set_volume", tabId, volume?, fadeMs?}`
+
+Notes on the protocol as built:
+
+- Every message carries a `type` field with the name shown above. `hello` must come first; anything else, a wrong token or an unsupported version gets `hello_ack {ok:false}` and the connection is closed.
+- The app refuses WebSocket connections whose `Origin` is not an extension, so web pages cannot reach it even with a token.
+- `browser` is the executable hosting the tabs (default `chrome.exe`); the desktop side ignores that process while a tab is the source.
+- `source_state.volume` is absent when the page has no media the extension can reach; the app then pauses without fading.
+- The app drives fades itself with repeated `set_volume` commands, so they can reverse mid-way. `fadeMs` is reserved.
+- A tab id only lives as long as the browser session, so a saved tab source has to be picked again after the browser restarts.
 
 ## 7. Architecture
 
@@ -135,7 +144,7 @@ Each phase ends with a manual test checklist for the user. Do not start the next
 - [x] Manual test: scenarios 3, 4, 5 through the real UI.
 
 ### Phase 4: Chrome extension
-- [ ] Bridge crate, pairing flow, extension (tabs list, select, pause, resume, fade).
+- [x] Bridge crate, pairing flow, extension (tabs list, select, pause, resume, fade).
 - [ ] Source picker shows Chrome tabs; scenarios 1 and 2 work.
 - [ ] Manual test on the user's real music sites.
 

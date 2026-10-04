@@ -43,6 +43,9 @@ jobs:
       - name: UI build
         run: pnpm -C ui build
 
+      - name: Extension build
+        run: pnpm -C extension build
+
       - name: Rust format
         run: cargo fmt --check
 

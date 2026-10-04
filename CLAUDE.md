@@ -46,6 +46,7 @@ Keep these current. Run them from the repo root.
 - Lint: `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check`
 - UI checks: `pnpm -C ui lint` and `pnpm -C ui typecheck`
 - UI build: `pnpm -C ui build`
+- Extension build: `pnpm -C extension build` (compiles `extension/src` to `extension/dist`; then load the `extension` folder in `chrome://extensions` with Developer mode on, or press its reload button after a rebuild). Typecheck only: `pnpm -C extension typecheck`
 - Saved configuration: `%APPDATA%\com.hnam0212.cricket\config.json` (delete it to reset). In `pnpm tauri dev` the engine's event log is also printed to the terminal.
 - Audio probe (debug CLI): `cargo run -p cricket-audio-win --bin cricket-probe -- <command>`. Commands: `list`, `watch`, `status <app>`, `pause <app>` (alias `fade <app>`: fade to silence, then pause), `resume <app>` (resume, then fade in), `volume <app> [level]`, `cycle <app>`, `run <app>` (headless mode: the engine driving the real backends, logging every decision). Run it with no command for full usage.
 

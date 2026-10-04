@@ -4,7 +4,7 @@ Cricket keeps your background music playing while the machine is quiet, and fade
 
 The music source can be a desktop app (such as Spotify) or one specific Chrome tab. Windows first, macOS later.
 
-Status: Phase 3 (UI). The Windows app works for desktop-app music sources: pick the source, and Cricket pauses and resumes it. Chrome tab sources come next. See `SPEC.md` for the product spec and the phase plan, and `CLAUDE.md` for the architecture rules.
+Status: Phase 4 (Chrome extension). The Windows app works for desktop-app music sources, and a browser extension lets one Chrome tab be the source. See `SPEC.md` for the product spec and the phase plan, and `CLAUDE.md` for the architecture rules.
 
 ## Prerequisites (Windows)
 
@@ -49,6 +49,22 @@ To build a release installer:
 pnpm tauri build
 ```
 
+## Chrome extension
+
+The extension lets Cricket use one browser tab as the music source and treat other tabs as activity. It talks to the app over a WebSocket on `127.0.0.1:47835`, protected by a pairing token.
+
+```powershell
+pnpm install
+pnpm -C extension build
+```
+
+1. Start Cricket.
+2. In Chrome, open `chrome://extensions`, turn on Developer mode, choose "Load unpacked" and select the `extension` folder.
+3. In Cricket, open "Browser extension" and copy the pairing token. Click the Cricket icon in Chrome's toolbar, paste the token and save. The popup should say "Connected to Cricket."
+4. Reload the tab that plays your music (tabs opened before the extension was installed cannot be controlled until reloaded), then pick it under "Music source".
+
+After changing extension code, rebuild and press the reload button on the extension's card in `chrome://extensions`.
+
 ## Audio probe
 
 `cricket-probe` is a debug CLI for the Windows audio backend. It shows what Cricket sees (audio sessions per app, peak levels, microphone use, media sessions) and can pause, resume and fade one app.
@@ -68,6 +84,7 @@ cargo run -p cricket-audio-win --bin cricket-probe -- run spotify.exe
 pnpm -C ui lint
 pnpm -C ui typecheck
 pnpm -C ui build
+pnpm -C extension build
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
@@ -85,4 +102,5 @@ crates/
   cricket-bridge/       # WebSocket server for the Chrome extension
 src-tauri/              # Tauri app, wires everything together
 ui/                     # React + TypeScript + Vite frontend
+extension/              # Chrome MV3 extension
 ```
