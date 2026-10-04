@@ -1,4 +1,4 @@
-# Manual test scenarios
+# Scenarios
 
 Situations that came up while reviewing and hardening the browser tab source (Phase 4 follow-up). Each one has the steps, the expected result and a sequence diagram of what happens between the parts.
 

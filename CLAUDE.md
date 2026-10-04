@@ -69,7 +69,7 @@ TypeScript is pinned to 6.x because typescript-eslint does not support TypeScrip
 
 - Work on one phase at a time (see `SPEC.md`). At the end of a phase, stop and give: a short summary, what changed, and a manual test checklist. Do not start the next phase until the user confirms.
 - You cannot hear audio. Never claim audio behavior is verified. Instead add diagnostic logging (session list, peak levels, state transitions with timestamps) and give the user concrete steps to test on their machine and paste logs back.
-- Every situation handled for a manual test goes into `docs/manual-test-scenarios.md`: steps, expected result, one Mermaid sequence diagram, and a row in its status table. Keep the status honest (confirmed by hand, or not tested).
+- Every situation the app handles goes into `docs/scenarios.md`: steps, expected result, one Mermaid sequence diagram, and a row in its status table. Keep the status honest (confirmed by hand, or not tested).
 - Ask before adding a significant new dependency.
 - Small, focused commits with conventional commit messages (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`).
 - The user develops on native Windows (PowerShell). Do not build the app inside WSL.
