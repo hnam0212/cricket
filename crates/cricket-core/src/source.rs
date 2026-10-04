@@ -30,6 +30,16 @@ pub struct TabInfo {
     /// The browser considers the tab to be making sound.
     #[serde(default)]
     pub audible: bool,
+    /// The extension can reach this page's player. `false` for sites the
+    /// user has not allowed yet; such a tab still counts as activity when
+    /// it is audible, but cannot be the music source. Extensions that do
+    /// not say are assumed to manage.
+    #[serde(default = "controllable_by_default")]
+    pub controllable: bool,
+}
+
+fn controllable_by_default() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -224,6 +224,7 @@ mod tests {
             title: title.to_string(),
             url: String::new(),
             audible,
+            controllable: true,
         }
     }
 

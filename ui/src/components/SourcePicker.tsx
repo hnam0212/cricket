@@ -94,17 +94,25 @@ export function SourcePicker({
         )}
         {tabs.map((tab) => (
           <li key={tab.id}>
-            <label className="source" title={tab.url}>
+            <label
+              className="source"
+              title={tab.controllable ? tab.url : strings.tabNeedsPermissionHint}
+            >
               <input
                 type="radio"
                 name="source"
+                disabled={!tab.controllable}
                 checked={!sourceStale && sourceTab?.id === tab.id}
                 onChange={() => onPick({ kind: "tab", id: tab.id, title: tab.title })}
               />
               <span className="source-name">{tabTitle(tab)}</span>
               <span className={tab.audible ? "dot dot-on" : "dot"} aria-hidden="true" />
               <span className="source-note">
-                {tab.audible ? strings.makingSound : strings.silent}
+                {!tab.controllable
+                  ? strings.tabNeedsPermission
+                  : tab.audible
+                    ? strings.makingSound
+                    : strings.silent}
               </span>
             </label>
           </li>

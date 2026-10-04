@@ -5,6 +5,13 @@
 //
 // Must stay a plain script (no imports or exports).
 (() => {
+  // Injected both by the manifest (or a registered script) and, right after
+  // a site is allowed, by hand. Listen only once.
+  const marker = "__cricketRelayInstalled";
+  const globals = window as unknown as Record<string, unknown>;
+  if (globals[marker]) return;
+  globals[marker] = true;
+
   const TO_PAGE = "cricket:to-page";
   const FROM_PAGE = "cricket:from-page";
 

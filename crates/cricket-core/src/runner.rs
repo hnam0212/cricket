@@ -605,12 +605,14 @@ mod tests {
                     title: "Music".to_string(),
                     url: String::new(),
                     audible: browser.music_playing,
+                    controllable: true,
                 },
                 TabInfo {
                     id: TabId(2),
                     title: "Video".to_string(),
                     url: String::new(),
                     audible: browser.other_tab_audible,
+                    controllable: true,
                 },
             ]
         }
