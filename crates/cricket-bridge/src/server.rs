@@ -42,8 +42,36 @@ struct State {
     /// The paired extension. A newer connection replaces an older one.
     client: Option<Client>,
     /// Remembered so it can be sent again after a reconnect.
-    selected: Option<TabId>,
+    selected: Option<Selection>,
     next_client_id: u64,
+}
+
+/// The tab chosen as the music source, with the browser session its id was
+/// picked in.
+struct Selection {
+    tab: TabId,
+    session: Option<String>,
+}
+
+impl State {
+    /// The tab to tell the extension about: the selected one, unless it was
+    /// picked in another browser session than the connected one. A tab id
+    /// saved before a browser restart can be any tab now.
+    fn live_selection(&self) -> Option<TabId> {
+        let selection = self.selected.as_ref()?;
+        (!self.selection_stale()).then_some(selection.tab)
+    }
+
+    fn selection_stale(&self) -> bool {
+        match (&self.selected, &self.client) {
+            // A selection saved without a session predates sessions and is
+            // trusted as before.
+            (Some(selection), Some(client)) => {
+                selection.session.is_some() && selection.session != client.session
+            }
+            _ => false,
+        }
+    }
 }
 
 struct Client {
@@ -52,6 +80,9 @@ struct Client {
     /// Messages queued for the socket and not yet written to it.
     pending: Arc<AtomicUsize>,
     browser: AppId,
+    /// Identifies the browser run the extension is in. `None` from an
+    /// extension that does not report one.
+    session: Option<String>,
     tabs: Vec<TabInfo>,
     source: Option<SourceState>,
 }
@@ -94,6 +125,15 @@ impl Bridge {
         self.port
     }
 
+    /// The browser session of the connected extension, if any. Tab ids
+    /// picked now are only meaningful within it.
+    pub fn current_session(&self) -> Option<String> {
+        self.state()
+            .client
+            .as_ref()
+            .and_then(|client| client.session.clone())
+    }
+
     fn state(&self) -> MutexGuard<'_, State> {
         self.shared.state.lock().expect("bridge state lock")
     }
@@ -123,6 +163,9 @@ impl Bridge {
     }
 
     fn command(&self, cmd: CommandKind, tab: TabId, volume: Option<f32>) -> BackendResult<()> {
+        if self.state().selection_stale() {
+            return Err(stale_selection());
+        }
         self.send(ServerMessage::Command {
             cmd,
             tab_id: tab,
@@ -138,6 +181,9 @@ impl Bridge {
     ) -> BackendResult<T> {
         let state = self.state();
         let client = state.client.as_ref().ok_or_else(not_connected)?;
+        if state.selection_stale() {
+            return Err(stale_selection());
+        }
         client
             .source
             .as_ref()
@@ -150,6 +196,12 @@ impl Bridge {
 
 fn not_connected() -> BackendError {
     BackendError::Unavailable("browser extension not connected".to_string())
+}
+
+fn stale_selection() -> BackendError {
+    BackendError::Unavailable(
+        "the tab was picked before the browser was restarted; pick it again".to_string(),
+    )
 }
 
 impl TabBridge for Bridge {
@@ -173,10 +225,21 @@ impl TabBridge for Bridge {
             .unwrap_or_default()
     }
 
-    fn select(&mut self, tab: Option<TabId>) {
-        self.state().selected = tab;
+    fn select(&mut self, tab: Option<TabId>, session: Option<&str>) {
+        let live = {
+            let mut state = self.state();
+            state.selected = tab.map(|tab| Selection {
+                tab,
+                session: session.map(str::to_string),
+            });
+            state.live_selection()
+        };
         // If nobody is connected, the selection is sent on the next hello.
-        let _ = self.send(ServerMessage::SelectSource { tab_id: tab });
+        let _ = self.send(ServerMessage::SelectSource { tab_id: live });
+    }
+
+    fn selection_stale(&mut self) -> bool {
+        self.state().selection_stale()
     }
 
     fn playback_state(&mut self, tab: TabId) -> BackendResult<PlaybackState> {
@@ -219,7 +282,7 @@ fn serve(stream: TcpStream, shared: &Shared) {
     let Ok(mut socket) = tungstenite::accept_hdr(stream, check_origin) else {
         return;
     };
-    let Some(browser) = pair(&mut socket, shared) else {
+    let Some(paired) = pair(&mut socket, shared) else {
         return;
     };
     if socket.get_ref().set_read_timeout(Some(READ_SLICE)).is_err() {
@@ -232,20 +295,23 @@ fn serve(stream: TcpStream, shared: &Shared) {
         let mut state = shared.state.lock().expect("bridge state lock");
         let id = state.next_client_id;
         state.next_client_id += 1;
-        // Tell the extension the current choice right away; it does not
-        // remember it across restarts of its service worker.
-        pending.fetch_add(1, Ordering::SeqCst);
-        let _ = outgoing.send(ServerMessage::SelectSource {
-            tab_id: state.selected,
-        });
+        let to_client = outgoing.clone();
         // Replacing the old client drops its sender, which ends its thread.
         state.client = Some(Client {
             id,
             outgoing,
             pending: Arc::clone(&pending),
-            browser,
+            browser: paired.browser,
+            session: paired.session,
             tabs: Vec::new(),
             source: None,
+        });
+        // Tell the extension the current choice right away; it does not
+        // remember it across restarts of its service worker. Decided after
+        // the client is in place, because it depends on its session.
+        pending.fetch_add(1, Ordering::SeqCst);
+        let _ = to_client.send(ServerMessage::SelectSource {
+            tab_id: state.live_selection(),
         });
         id
     };
@@ -280,8 +346,18 @@ fn check_origin(request: &Request, response: Response) -> Result<Response, Error
     }
 }
 
-/// Waits for a valid `hello`. Returns the browser's executable on success.
-fn pair(socket: &mut WebSocket<TcpStream>, shared: &Shared) -> Option<AppId> {
+/// Longest session id taken from a `hello`; the extension sends a UUID.
+const MAX_SESSION_CHARS: usize = 64;
+
+/// What a valid `hello` told us about the extension.
+struct Paired {
+    /// The browser's executable.
+    browser: AppId,
+    session: Option<String>,
+}
+
+/// Waits for a valid `hello`.
+fn pair(socket: &mut WebSocket<TcpStream>, shared: &Shared) -> Option<Paired> {
     let hello = loop {
         match socket.read().ok()? {
             Message::Text(text) => break serde_json::from_str::<ClientMessage>(&text).ok(),
@@ -294,6 +370,7 @@ fn pair(socket: &mut WebSocket<TcpStream>, shared: &Shared) -> Option<AppId> {
         Some(ClientMessage::Hello {
             version,
             token,
+            session,
             browser,
         }) => {
             if version != PROTOCOL_VERSION {
@@ -303,14 +380,18 @@ fn pair(socket: &mut WebSocket<TcpStream>, shared: &Shared) -> Option<AppId> {
             } else if !tokens_match(&token, &shared.token) {
                 Err("wrong pairing token".to_string())
             } else {
-                Ok(AppId::new(browser.as_deref().unwrap_or(DEFAULT_BROWSER)))
+                Ok(Paired {
+                    browser: AppId::new(browser.as_deref().unwrap_or(DEFAULT_BROWSER)),
+                    session: session
+                        .filter(|id| !id.is_empty() && id.chars().count() <= MAX_SESSION_CHARS),
+                })
             }
         }
         _ => Err("expected hello".to_string()),
     };
 
     match verdict {
-        Ok(browser) => {
+        Ok(paired) => {
             send(
                 socket,
                 &ServerMessage::HelloAck {
@@ -319,7 +400,7 @@ fn pair(socket: &mut WebSocket<TcpStream>, shared: &Shared) -> Option<AppId> {
                 },
             )
             .ok()?;
-            Some(browser)
+            Some(paired)
         }
         Err(error) => {
             let _ = send(
@@ -687,7 +768,7 @@ mod tests {
     #[test]
     fn a_selection_made_before_connecting_is_sent_on_hello() {
         let mut bridge = start();
-        bridge.select(Some(TabId(9)));
+        bridge.select(Some(TabId(9)), None);
 
         let mut client = connect(&bridge);
         say(
@@ -702,19 +783,111 @@ mod tests {
         );
     }
 
+    /// Connects and pairs as an extension in the given browser session,
+    /// returning the initial selection it is told about.
+    fn paired_in_session(bridge: &Bridge, session: &str) -> (Client, serde_json::Value) {
+        let mut client = connect(bridge);
+        say(
+            &mut client,
+            &format!(r#"{{"type":"hello","version":1,"token":"{TOKEN}","session":"{session}"}}"#),
+        );
+        assert_eq!(hear(&mut client)["ok"], true);
+        let selection = hear(&mut client);
+        (client, selection)
+    }
+
+    #[test]
+    fn a_tab_picked_in_the_same_browser_session_is_restored() {
+        let mut bridge = start();
+        bridge.select(Some(TabId(9)), Some("run-1"));
+
+        let (_client, selection) = paired_in_session(&bridge, "run-1");
+
+        assert_eq!(
+            selection,
+            serde_json::json!({"type":"select_source","tabId":9})
+        );
+        assert!(!bridge.selection_stale());
+        assert_eq!(bridge.current_session().as_deref(), Some("run-1"));
+    }
+
+    #[test]
+    fn a_tab_from_an_earlier_browser_session_is_not_selected() {
+        let mut bridge = start();
+        // Picked before the browser was restarted: tab 9 then is not tab 9 now.
+        bridge.select(Some(TabId(9)), Some("run-1"));
+
+        let (mut client, selection) = paired_in_session(&bridge, "run-2");
+
+        assert_eq!(
+            selection,
+            serde_json::json!({"type":"select_source","tabId":null})
+        );
+        wait_until("connected", || bridge.connected());
+        assert!(bridge.selection_stale());
+        // Nothing is sent to whatever tab 9 is now, and its reports are not
+        // taken for the music.
+        assert!(bridge.pause(TabId(9)).is_err());
+        say(
+            &mut client,
+            r#"{"type":"source_state","tabId":9,"playing":true,"volume":0.5}"#,
+        );
+        say(&mut client, r#"{"type":"tabs","tabs":[{"id":9}]}"#);
+        wait_until("tabs", || bridge.tabs().len() == 1);
+        assert!(bridge.playback_state(TabId(9)).is_err());
+    }
+
+    #[test]
+    fn picking_the_tab_again_in_the_new_session_selects_it() {
+        let mut bridge = start();
+        bridge.select(Some(TabId(9)), Some("run-1"));
+        let (mut client, _) = paired_in_session(&bridge, "run-2");
+        wait_until("connected", || bridge.connected());
+
+        bridge.select(Some(TabId(4)), Some("run-2"));
+
+        assert_eq!(
+            hear(&mut client),
+            serde_json::json!({"type":"select_source","tabId":4})
+        );
+        assert!(!bridge.selection_stale());
+    }
+
+    #[test]
+    fn a_tab_saved_without_a_session_is_still_selected() {
+        let mut bridge = start();
+        bridge.select(Some(TabId(9)), None);
+
+        let (_client, selection) = paired_in_session(&bridge, "run-2");
+
+        assert_eq!(selection["tabId"], 9);
+        assert!(!bridge.selection_stale());
+    }
+
+    #[test]
+    fn a_tab_with_a_session_is_stale_for_an_extension_that_reports_none() {
+        let mut bridge = start();
+        bridge.select(Some(TabId(9)), Some("run-1"));
+
+        let _client = paired(&bridge);
+        wait_until("connected", || bridge.connected());
+
+        assert!(bridge.selection_stale());
+    }
+
     #[test]
     fn a_selection_made_while_connected_is_sent_at_once() {
         let mut bridge = start();
         let mut client = paired(&bridge);
         wait_until("connected", || bridge.connected());
 
-        bridge.select(Some(TabId(3)));
+        bridge.select(Some(TabId(3)), None);
         assert_eq!(
             hear(&mut client),
             serde_json::json!({"type":"select_source","tabId":3})
         );
 
-        bridge.select(None);
+        bridge.select(None, None);
         assert_eq!(
             hear(&mut client),
             serde_json::json!({"type":"select_source","tabId":null})

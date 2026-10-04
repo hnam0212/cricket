@@ -32,6 +32,9 @@ pub struct StepReport {
     /// app; for a browser tab it means the extension is connected and the
     /// tab is reporting. While false the engine holds its state.
     pub source_available: bool,
+    /// A tab source picked in an earlier browser session: the browser was
+    /// restarted and the tab has to be picked again.
+    pub source_stale: bool,
     pub output: TickOutput,
     /// Backend calls that failed during this step.
     pub errors: Vec<String>,
@@ -99,10 +102,12 @@ impl<A: AudioBackend, M: MediaController, B: TabBridge, C: Clock + Clone> Runner
             return Vec::new();
         }
         let errors = self.hand_back();
-        self.tabs.select(match &source {
-            Some(Source::Tab { id, .. }) => Some(*id),
-            _ => None,
-        });
+        match &source {
+            Some(Source::Tab { id, session, .. }) => {
+                self.tabs.select(Some(*id), session.as_deref())
+            }
+            _ => self.tabs.select(None, None),
+        }
         self.source = source;
         // A fresh engine: timers and the remembered volume belong to the
         // old source.
@@ -187,6 +192,7 @@ impl<A: AudioBackend, M: MediaController, B: TabBridge, C: Clock + Clone> Runner
                 // No fresh report means the extension is gone, or the tab is
                 // closed or silent about itself: we are blind, not paused.
                 report.source_available = report.playback.is_some();
+                report.source_stale = self.tabs.selection_stale();
             }
         }
         report.snapshot = Some(snapshot);
@@ -609,7 +615,7 @@ mod tests {
             ]
         }
 
-        fn select(&mut self, tab: Option<TabId>) {
+        fn select(&mut self, tab: Option<TabId>, _session: Option<&str>) {
             self.0.borrow_mut().selected = tab;
         }
 
@@ -686,6 +692,7 @@ mod tests {
             runner.set_source(Some(Source::Tab {
                 id: MUSIC_TAB,
                 title: "Music".to_string(),
+                session: None,
             }));
             Self {
                 machine,

@@ -20,6 +20,7 @@ export const strings = {
   sourceEmpty: "No apps with audio yet. Start your music app and play something.",
   sourceNotRunning: "not playing sound right now",
   tabNotAvailable: "tab not available",
+  tabStale: "Picked before the browser restarted. Pick the tab again.",
   tabsNotConnected:
     "Connect the Cricket browser extension to pick a tab. See Browser extension below.",
   tabsEmpty: "The extension is connected but reported no tabs yet.",
@@ -130,6 +131,13 @@ export function activityText(activity: Activity | null): string {
 /** The headline and the detail line of the status area. */
 /** A browser tab source that cannot be seen right now. Cricket keeps its state meanwhile. */
 function unavailableText(status: Status): { headline: string; detail: string } {
+  if (status.source_stale) {
+    return {
+      headline: "Pick your tab again",
+      detail:
+        "The browser was restarted, so Cricket cannot tell which tab it was. Pick the tab under Music source.",
+    };
+  }
   const reason = status.bridge.connected
     ? "The tab is closed, or needs a reload so the extension can reach its player."
     : "The browser extension is not connected.";

@@ -84,6 +84,7 @@ export function App() {
             tabs={status.tabs}
             bridge={status.bridge}
             source={status.source}
+            sourceStale={status.source_stale}
             onPick={(source) => apply(api.setSource(source))}
           />
 

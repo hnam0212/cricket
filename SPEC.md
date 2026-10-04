@@ -83,7 +83,7 @@ Transitions:
 
 Protocol (JSON messages, versioned):
 
-- Extension to app: `hello {version, token, browser?}`, `tabs {tabs:[{id,title,url,audible}]}`, `source_state {tabId, playing, volume?}`, `ping {}`
+- Extension to app: `hello {version, token, session?, browser?}`, `tabs {tabs:[{id,title,url,audible}]}`, `source_state {tabId, playing, volume?}`, `ping {}`
 - App to extension: `hello_ack {ok, error?}`, `select_source {tabId|null}`, `command {cmd:"pause"|"resume"|"set_volume", tabId, volume?, fadeMs?}`
 
 Notes on the protocol as built:
@@ -93,7 +93,7 @@ Notes on the protocol as built:
 - `browser` is the executable hosting the tabs (default `chrome.exe`); the desktop side ignores that process while a tab is the source.
 - `source_state.volume` is absent when the page has no media the extension can reach; the app then pauses without fading.
 - The app drives fades itself with repeated `set_volume` commands, so they can reverse mid-way. `fadeMs` is reserved.
-- A tab id only lives as long as the browser session, so a saved tab source has to be picked again after the browser restarts.
+- A tab id only lives as long as the browser run. The extension sends a `session` id in `hello` (random, kept in `chrome.storage.session`, so it survives the service worker stopping but not a browser restart or an extension reload). A saved tab source remembers the session it was picked in; if the connected session differs, the tab is not selected, the engine holds, and the UI asks to pick the tab again. Sources saved without a session keep the old behavior.
 
 ## 7. Architecture
 

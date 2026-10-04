@@ -25,6 +25,9 @@ const MINI_SIZE: LogicalSize<f64> = LogicalSize::new(460.0, 150.0);
 struct App {
     service: Service,
     store: ConfigStore,
+    /// A handle on the running bridge, if it started. The service owns the
+    /// one that carries commands.
+    bridge: Option<Bridge>,
     /// The tray's "Enabled" item, kept so it can follow the window's switch.
     tray_enabled: Mutex<Option<CheckMenuItem<Wry>>>,
 }
@@ -51,6 +54,21 @@ fn set_source(app: State<App>, source: Option<Source>) -> AppConfig {
         Source::App { app } => *app != AppId::new(""),
         Source::Tab { .. } => true,
     });
+    // A tab id only means something in the browser run it was picked in:
+    // remember which one, so a restart is noticed instead of trusting an id
+    // that may now be another tab.
+    let source = match source {
+        Some(Source::Tab {
+            id,
+            title,
+            session: None,
+        }) => Some(Source::Tab {
+            id,
+            title,
+            session: app.bridge.as_ref().and_then(Bridge::current_session),
+        }),
+        other => other,
+    };
     app.service.set_source(source.clone());
     app.store.update(|config| config.source = source)
 }
@@ -209,7 +227,7 @@ pub fn run() {
             let tray_handle = handle.clone();
             let service = Service::start(
                 &config,
-                Tabs(bridge),
+                Tabs(bridge.clone()),
                 BridgeStatus {
                     connected: false,
                     port,
@@ -225,6 +243,7 @@ pub fn run() {
             app.manage(App {
                 service,
                 store,
+                bridge,
                 tray_enabled: Mutex::new(None),
             });
             let enabled_item = build_tray(&handle, config.enabled)?;

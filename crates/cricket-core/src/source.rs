@@ -43,6 +43,12 @@ pub enum Source {
         /// The title when the tab was picked. Only for display while the
         /// live tab list is not available; it goes stale as tracks change.
         title: String,
+        /// Which browser session the tab id belongs to. Tab ids are only
+        /// unique within one run of the browser: after a restart the same
+        /// number can be a different tab. `None` for sources saved before
+        /// sessions existed, and until the app fills it in on picking.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<String>,
     },
 }
 
@@ -54,11 +60,18 @@ impl Source {
     }
 
     /// Whether both refer to the same app or the same tab. A tab's title is
-    /// not part of its identity.
+    /// not part of its identity; its browser session is.
     pub fn same_target(&self, other: &Source) -> bool {
         match (self, other) {
             (Self::App { app: a }, Self::App { app: b }) => a == b,
-            (Self::Tab { id: a, .. }, Self::Tab { id: b, .. }) => a == b,
+            (
+                Self::Tab {
+                    id: a, session: sa, ..
+                },
+                Self::Tab {
+                    id: b, session: sb, ..
+                },
+            ) => a == b && sa == sb,
             _ => false,
         }
     }
@@ -68,7 +81,7 @@ impl fmt::Display for Source {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::App { app } => write!(f, "{app}"),
-            Self::Tab { id, title } => write!(f, "tab {id} ({title})"),
+            Self::Tab { id, title, .. } => write!(f, "tab {id} ({title})"),
         }
     }
 }
@@ -92,6 +105,8 @@ enum TaggedSource {
         id: TabId,
         #[serde(default)]
         title: String,
+        #[serde(default)]
+        session: Option<String>,
     },
 }
 
@@ -99,7 +114,9 @@ impl From<SourceRepr> for Source {
     fn from(repr: SourceRepr) -> Self {
         match repr {
             SourceRepr::Tagged(TaggedSource::App { app }) => Self::App { app },
-            SourceRepr::Tagged(TaggedSource::Tab { id, title }) => Self::Tab { id, title },
+            SourceRepr::Tagged(TaggedSource::Tab { id, title, session }) => {
+                Self::Tab { id, title, session }
+            }
             SourceRepr::LegacyApp(name) => Self::app(&name),
         }
     }
@@ -119,7 +136,17 @@ pub trait TabBridge {
 
     /// Tells the extension which tab is the music source, so it reports that
     /// tab's playback state.
-    fn select(&mut self, tab: Option<TabId>);
+    ///
+    /// `session` is the browser session the tab id was picked in. If the
+    /// extension is in a different session now (the browser was restarted),
+    /// the id means nothing and must not be selected.
+    fn select(&mut self, tab: Option<TabId>, session: Option<&str>);
+
+    /// The selected tab was picked in another browser session than the one
+    /// that is connected, so it cannot be told apart from some other tab.
+    fn selection_stale(&mut self) -> bool {
+        false
+    }
 
     fn playback_state(&mut self, tab: TabId) -> BackendResult<PlaybackState>;
     fn volume(&mut self, tab: TabId) -> BackendResult<f32>;
@@ -159,7 +186,7 @@ impl TabBridge for NoTabs {
         Vec::new()
     }
 
-    fn select(&mut self, _tab: Option<TabId>) {}
+    fn select(&mut self, _tab: Option<TabId>, _session: Option<&str>) {}
 
     fn playback_state(&mut self, _tab: TabId) -> BackendResult<PlaybackState> {
         Self::unavailable()
@@ -193,6 +220,12 @@ mod tests {
             Source::Tab {
                 id: TabId(42),
                 title: "YouTube Music".to_string(),
+                session: None,
+            },
+            Source::Tab {
+                id: TabId(42),
+                title: "YouTube Music".to_string(),
+                session: Some("abc".to_string()),
             },
         ] {
             let json = serde_json::to_string(&source).unwrap();
@@ -209,10 +242,25 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Source::Tab {
                 id: TabId(7),
-                title: "Mix".to_string()
+                title: "Mix".to_string(),
+                session: None,
             })
             .unwrap(),
             r#"{"kind":"tab","id":7,"title":"Mix"}"#
+        );
+    }
+
+    #[test]
+    fn a_tab_saved_without_a_session_still_loads() {
+        let source: Source =
+            serde_json::from_str(r#"{"kind":"tab","id":3,"title":"Mix"}"#).unwrap();
+        assert_eq!(
+            source,
+            Source::Tab {
+                id: TabId(3),
+                title: "Mix".to_string(),
+                session: None
+            }
         );
     }
 
@@ -226,21 +274,20 @@ mod tests {
 
     #[test]
     fn a_tab_is_the_same_target_whatever_its_title() {
-        let before = Source::Tab {
-            id: TabId(7),
-            title: "Song A".to_string(),
+        let tab = |id: i64, title: &str, session: Option<&str>| Source::Tab {
+            id: TabId(id),
+            title: title.to_string(),
+            session: session.map(str::to_string),
         };
-        let after = Source::Tab {
-            id: TabId(7),
-            title: "Song B".to_string(),
-        };
-        let other = Source::Tab {
-            id: TabId(8),
-            title: "Song A".to_string(),
-        };
+        let before = tab(7, "Song A", Some("s1"));
+        let after = tab(7, "Song B", Some("s1"));
+        let other = tab(8, "Song A", Some("s1"));
+        let other_session = tab(7, "Song A", Some("s2"));
 
         assert!(before.same_target(&after));
         assert!(!before.same_target(&other));
+        // The same number after a browser restart is not the same tab.
+        assert!(!before.same_target(&other_session));
         assert!(!before.same_target(&Source::app("chrome.exe")));
     }
 }

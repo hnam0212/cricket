@@ -59,6 +59,18 @@
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   };
 
+  /** Identifies this browser run. Tab ids are only unique within one, so the
+   *  app uses it to tell a saved tab from a different tab that got the same
+   *  number after a restart. Session storage lives exactly as long as the
+   *  browser run and survives the service worker being stopped. */
+  const sessionId = async (): Promise<string> => {
+    const stored = await chrome.storage.session.get("sessionId");
+    if (typeof stored.sessionId === "string") return stored.sessionId;
+    const id = crypto.randomUUID();
+    await chrome.storage.session.set({ sessionId: id });
+    return id;
+  };
+
   const browserExe = (): string => {
     const agent = navigator.userAgent;
     if (agent.includes("Edg/")) return "msedge.exe";
@@ -85,15 +97,20 @@
     const ws = new WebSocket(`ws://127.0.0.1:${port}`);
     socket = ws;
 
-    ws.onopen = () =>
+    ws.onopen = async () => {
+      const session = await sessionId();
+      // The socket may have closed while storage was being read.
+      if (ws.readyState !== WebSocket.OPEN) return;
       ws.send(
         JSON.stringify({
           type: "hello",
           version: PROTOCOL_VERSION,
           token,
+          session,
           browser: browserExe(),
         }),
       );
+    };
     ws.onmessage = (event) => {
       try {
         handle(JSON.parse(String(event.data)) as ServerMessage);

@@ -16,6 +16,11 @@ pub enum ClientMessage {
     Hello {
         version: u32,
         token: String,
+        /// Identifies this browser run. Tab ids are only meaningful within
+        /// one, so a saved tab is matched to it. Absent from extensions
+        /// older than this field.
+        #[serde(default)]
+        session: Option<String>,
         /// Executable name of the browser, for example `chrome.exe`.
         #[serde(default)]
         browser: Option<String>,
@@ -84,6 +89,23 @@ mod tests {
             ClientMessage::Hello {
                 version: 1,
                 token: "abc".to_string(),
+                session: None,
+                browser: None
+            }
+        );
+    }
+
+    #[test]
+    fn parses_hello_with_a_session() {
+        let message: ClientMessage =
+            serde_json::from_str(r#"{"type":"hello","version":1,"token":"abc","session":"run-1"}"#)
+                .unwrap();
+        assert_eq!(
+            message,
+            ClientMessage::Hello {
+                version: 1,
+                token: "abc".to_string(),
+                session: Some("run-1".to_string()),
                 browser: None
             }
         );
