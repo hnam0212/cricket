@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type AppConfig, type Status } from "./api";
 import { Diagnostics } from "./components/Diagnostics";
+import { ExtensionPanel } from "./components/ExtensionPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SourcePicker } from "./components/SourcePicker";
 import { Switch } from "./components/Switch";
@@ -80,6 +81,8 @@ export function App() {
         <>
           <SourcePicker
             apps={status.apps}
+            tabs={status.tabs}
+            bridge={status.bridge}
             source={status.source}
             onPick={(source) => apply(api.setSource(source))}
           />
@@ -90,6 +93,8 @@ export function App() {
             onChange={(settings) => apply(api.setSettings(settings))}
             onMinimizeToTray={(value) => apply(api.setMinimizeToTray(value))}
           />
+
+          <ExtensionPanel bridge={status.bridge} token={config.bridge_token} />
 
           <label className="check">
             <input

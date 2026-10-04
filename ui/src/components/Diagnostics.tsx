@@ -1,5 +1,5 @@
 import type { Status } from "../api";
-import { activityText, strings } from "../strings";
+import { activityText, sourceName, strings, tabTitle } from "../strings";
 import { PeakBar } from "./PeakBar";
 
 interface DiagnosticsProps {
@@ -10,6 +10,9 @@ interface DiagnosticsProps {
 export function Diagnostics({ status }: DiagnosticsProps) {
   // Newest first, so the latest decision is visible without scrolling.
   const events = [...status.events].reverse();
+  const { source } = status;
+  const isSourceApp = (app: string) => source?.kind === "app" && source.app === app;
+  const isSourceTab = (id: number) => source?.kind === "tab" && source.id === id;
 
   return (
     <section className="diagnostics">
@@ -19,12 +22,21 @@ export function Diagnostics({ status }: DiagnosticsProps) {
         <dd>{status.state}</dd>
         <dt>{strings.engineReason}</dt>
         <dd>{status.reason || strings.none}</dd>
+        <dt>{strings.engineSource}</dt>
+        <dd>{status.source ? sourceName(status.source, status.tabs) : strings.none}</dd>
         <dt>{strings.enginePlayback}</dt>
         <dd>{status.playback ?? strings.unavailable}</dd>
         <dt>{strings.engineVolume}</dt>
         <dd>{status.volume === null ? strings.unavailable : status.volume.toFixed(3)}</dd>
         <dt>{strings.engineActivity}</dt>
         <dd>{activityText(status.activity)}</dd>
+        <dt>{strings.engineExtension}</dt>
+        <dd>
+          {status.bridge.error ??
+            (status.bridge.connected
+              ? strings.extensionConnected
+              : strings.extensionNotConnected)}
+        </dd>
         <dt>{strings.microphone}</dt>
         <dd>
           {status.mic_users.length > 0
@@ -56,7 +68,7 @@ export function Diagnostics({ status }: DiagnosticsProps) {
         </thead>
         <tbody>
           {status.apps.map((app) => (
-            <tr key={app.app} className={app.app === status.source ? "is-source" : undefined}>
+            <tr key={app.app} className={isSourceApp(app.app) ? "is-source" : undefined}>
               <td>
                 {app.app}
                 {app.is_system_sounds && ` (${strings.systemSounds})`}
@@ -70,6 +82,28 @@ export function Diagnostics({ status }: DiagnosticsProps) {
           ))}
         </tbody>
       </table>
+
+      {status.tabs.length > 0 && (
+        <>
+          <h3>{strings.diagnosticsTabs}</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>{strings.colTab}</th>
+                <th>{strings.colAudible}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {status.tabs.map((tab) => (
+                <tr key={tab.id} className={isSourceTab(tab.id) ? "is-source" : undefined}>
+                  <td>{tabTitle(tab)}</td>
+                  <td>{tab.audible ? strings.yes : strings.no}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
 
       <h3>{strings.diagnosticsLog}</h3>
       {events.length === 0 ? (

@@ -13,7 +13,24 @@ export type PlaybackState = "Playing" | "Paused" | "Stopped" | "Unknown";
 
 export type Activity =
   | { kind: "sound"; app: string; peak: number }
-  | { kind: "microphone"; app: string };
+  | { kind: "microphone"; app: string }
+  | { kind: "tab"; title: string };
+
+/** The music source: a desktop app or one browser tab. */
+export type Source = { kind: "app"; app: string } | { kind: "tab"; id: number; title: string };
+
+export interface TabInfo {
+  id: number;
+  title: string;
+  url: string;
+  audible: boolean;
+}
+
+export interface BridgeStatus {
+  connected: boolean;
+  port: number;
+  error: string | null;
+}
 
 export interface AppView {
   app: string;
@@ -32,13 +49,15 @@ export interface LogEvent {
 export interface Status {
   state: EngineState;
   reason: string;
-  source: string | null;
+  source: Source | null;
   enabled: boolean;
   playback: PlaybackState | null;
   volume: number | null;
   activity: Activity | null;
   apps: AppView[];
   mic_users: string[];
+  tabs: TabInfo[];
+  bridge: BridgeStatus;
   errors: string[];
   events: LogEvent[];
   fatal: string | null;
@@ -56,19 +75,20 @@ export interface Settings {
 
 export interface AppConfig {
   version: number;
-  source: string | null;
+  source: Source | null;
   enabled: boolean;
   settings: Settings;
   minimize_to_tray: boolean;
   mini_mode: boolean;
   show_diagnostics: boolean;
+  bridge_token: string;
 }
 
 export const api = {
   coreInfo: () => invoke<string>("core_info"),
   getStatus: () => invoke<Status>("get_status"),
   getConfig: () => invoke<AppConfig>("get_config"),
-  setSource: (source: string | null) => invoke<AppConfig>("set_source", { source }),
+  setSource: (source: Source | null) => invoke<AppConfig>("set_source", { source }),
   setEnabled: (enabled: boolean) => invoke<AppConfig>("set_enabled", { enabled }),
   setSettings: (settings: Settings) => invoke<AppConfig>("set_settings", { settings }),
   setMinimizeToTray: (value: boolean) => invoke<AppConfig>("set_minimize_to_tray", { value }),

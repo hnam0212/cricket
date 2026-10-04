@@ -1,18 +1,24 @@
-import type { AppView } from "../api";
-import { strings } from "../strings";
+import type { AppView, BridgeStatus, Source, TabInfo } from "../api";
+import { strings, tabTitle } from "../strings";
 import { PeakBar } from "./PeakBar";
 
 interface SourcePickerProps {
   apps: AppView[];
-  source: string | null;
-  onPick: (source: string | null) => void;
+  tabs: TabInfo[];
+  bridge: BridgeStatus;
+  source: Source | null;
+  onPick: (source: Source | null) => void;
 }
 
-export function SourcePicker({ apps, source, onPick }: SourcePickerProps) {
+export function SourcePicker({ apps, tabs, bridge, source, onPick }: SourcePickerProps) {
   const candidates = apps.filter((app) => !app.is_system_sounds);
-  // Keep the chosen source in the list even while it has no audio session
-  // (a paused player often has none), so the choice stays visible.
-  const sourceMissing = source !== null && !candidates.some((app) => app.app === source);
+  const sourceApp = source?.kind === "app" ? source.app : null;
+  const sourceTab = source?.kind === "tab" ? source : null;
+  // Keep the chosen source in the list even while it is not there (a paused
+  // player often has no audio session; a tab may be closed or the extension
+  // not connected), so the choice stays visible.
+  const appMissing = sourceApp !== null && !candidates.some((app) => app.app === sourceApp);
+  const tabMissing = sourceTab !== null && !tabs.some((tab) => tab.id === sourceTab.id);
 
   return (
     <section>
@@ -30,12 +36,14 @@ export function SourcePicker({ apps, source, onPick }: SourcePickerProps) {
             <span className="source-name">{strings.sourceNone}</span>
           </label>
         </li>
-        {sourceMissing && (
+
+        <li className="source-group">{strings.sourceApps}</li>
+        {appMissing && (
           <li>
             <label className="source">
               <input type="radio" name="source" checked readOnly />
-              <span className="source-name">{source}</span>
-              <span className="source-note">{strings.sourceNotRunning}</span>
+              <span className="source-name">{sourceApp}</span>
+              <span className="source-note wide">{strings.sourceNotRunning}</span>
             </label>
           </li>
         )}
@@ -45,8 +53,8 @@ export function SourcePicker({ apps, source, onPick }: SourcePickerProps) {
               <input
                 type="radio"
                 name="source"
-                checked={source === app.app}
-                onChange={() => onPick(app.app)}
+                checked={sourceApp === app.app}
+                onChange={() => onPick({ kind: "app", app: app.app })}
               />
               <span className="source-name">{app.app}</span>
               <PeakBar peak={app.peak} makingSound={app.making_sound} />
@@ -56,8 +64,43 @@ export function SourcePicker({ apps, source, onPick }: SourcePickerProps) {
             </label>
           </li>
         ))}
+        {candidates.length === 0 && !appMissing && (
+          <li className="source-empty">{strings.sourceEmpty}</li>
+        )}
+
+        <li className="source-group">{strings.sourceTabs}</li>
+        {tabMissing && sourceTab && (
+          <li>
+            <label className="source">
+              <input type="radio" name="source" checked readOnly />
+              <span className="source-name">{tabTitle(sourceTab)}</span>
+              <span className="source-note wide">{strings.tabNotAvailable}</span>
+            </label>
+          </li>
+        )}
+        {tabs.map((tab) => (
+          <li key={tab.id}>
+            <label className="source" title={tab.url}>
+              <input
+                type="radio"
+                name="source"
+                checked={sourceTab?.id === tab.id}
+                onChange={() => onPick({ kind: "tab", id: tab.id, title: tab.title })}
+              />
+              <span className="source-name">{tabTitle(tab)}</span>
+              <span className={tab.audible ? "dot dot-on" : "dot"} aria-hidden="true" />
+              <span className="source-note">
+                {tab.audible ? strings.makingSound : strings.silent}
+              </span>
+            </label>
+          </li>
+        ))}
+        {tabs.length === 0 && (
+          <li className="source-empty">
+            {bridge.connected ? strings.tabsEmpty : strings.tabsNotConnected}
+          </li>
+        )}
       </ul>
-      {candidates.length === 0 && !sourceMissing && <p className="hint">{strings.sourceEmpty}</p>}
     </section>
   );
 }
