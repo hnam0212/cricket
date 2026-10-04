@@ -14,6 +14,7 @@ tauri-build = { version = "2.7.1", features = [] }
 [dependencies]
 cricket-core.workspace = true
 cricket-audio-win.workspace = true
+cricket-bridge.workspace = true
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2.12.1", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2.5.2"

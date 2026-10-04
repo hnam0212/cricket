@@ -6,10 +6,12 @@ mod strings;
 
 use std::sync::Mutex;
 
+use cricket_bridge::Bridge;
 use cricket_core::audio::AppId;
 use cricket_core::config::AppConfig;
 use cricket_core::settings::Settings;
-use service::{Service, Status};
+use cricket_core::source::Source;
+use service::{BridgeStatus, Service, Status, Tabs};
 use store::ConfigStore;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -43,10 +45,12 @@ fn get_config(app: State<App>) -> AppConfig {
 }
 
 #[tauri::command]
-fn set_source(app: State<App>, source: Option<String>) -> AppConfig {
-    let source = source
-        .map(|name| AppId::new(&name))
-        .filter(|app| !app.as_str().is_empty());
+fn set_source(app: State<App>, source: Option<Source>) -> AppConfig {
+    // An app source without a name is no source.
+    let source = source.filter(|source| match source {
+        Source::App { app } => *app != AppId::new(""),
+        Source::Tab { .. } => true,
+    });
     app.service.set_source(source.clone());
     app.store.update(|config| config.source = source)
 }
@@ -184,14 +188,39 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let store = ConfigStore::load(app.path().app_config_dir()?.join("config.json"));
-            let config = store.get();
+            let mut config = store.get();
+            if config.bridge_token.is_empty() {
+                // First start: create the secret the extension pairs with.
+                let token = cricket_bridge::generate_token()?;
+                config = store.update(|config| config.bridge_token = token);
+            }
+
+            // The app works without the bridge (desktop app sources), so a
+            // port that is already taken is reported, not fatal.
+            let port = cricket_bridge::DEFAULT_PORT;
+            let (bridge, bridge_error) = match Bridge::start(port, config.bridge_token.clone()) {
+                Ok(bridge) => (Some(bridge), None),
+                Err(error) => {
+                    eprintln!("bridge: could not listen on 127.0.0.1:{port}: {error}");
+                    (None, Some(error.to_string()))
+                }
+            };
 
             let tray_handle = handle.clone();
-            let service = Service::start(&config, move |state, has_source| {
-                if let Some(tray) = tray_handle.tray_by_id(TRAY_ID) {
-                    let _ = tray.set_tooltip(Some(strings::tray_tooltip(state, has_source)));
-                }
-            });
+            let service = Service::start(
+                &config,
+                Tabs(bridge),
+                BridgeStatus {
+                    connected: false,
+                    port,
+                    error: bridge_error,
+                },
+                move |state, has_source| {
+                    if let Some(tray) = tray_handle.tray_by_id(TRAY_ID) {
+                        let _ = tray.set_tooltip(Some(strings::tray_tooltip(state, has_source)));
+                    }
+                },
+            );
 
             app.manage(App {
                 service,

@@ -10,6 +10,7 @@ use cricket_core::engine::State;
 use cricket_core::eventlog::EventLog;
 use cricket_core::runner::Runner;
 use cricket_core::settings::Settings;
+use cricket_core::source::{NoTabs, Source};
 
 use crate::probe::{text, CliResult, Log, POLL_INTERVAL};
 
@@ -32,8 +33,8 @@ pub fn run(log: &Log, app: &AppId, settings: Settings) -> CliResult {
     ));
     log.line("running; stop with Ctrl+C");
 
-    let mut runner = Runner::new(audio, media, SystemClock::new(), settings);
-    runner.set_source(Some(app.clone()));
+    let mut runner = Runner::new(audio, media, NoTabs, SystemClock::new(), settings);
+    runner.set_source(Some(Source::App { app: app.clone() }));
     let mut events = EventLog::new();
     let mut stopping = false;
     loop {

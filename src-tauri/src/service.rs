@@ -12,14 +12,16 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use cricket_audio_win::{SmtcController, WinAudioBackend};
+use cricket_bridge::Bridge;
 use cricket_core::activity::ActivityCause;
-use cricket_core::audio::{AppId, PlaybackState};
+use cricket_core::audio::{AppId, BackendResult, PlaybackState};
 use cricket_core::clock::SystemClock;
 use cricket_core::config::AppConfig;
 use cricket_core::engine::State;
 use cricket_core::eventlog::EventLog;
 use cricket_core::runner::{Runner, StepReport};
 use cricket_core::settings::Settings;
+use cricket_core::source::{NoTabs, Source, TabBridge, TabId, TabInfo};
 use serde::Serialize;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -34,18 +36,96 @@ pub struct Status {
     pub state: State,
     /// Why the engine entered the current state.
     pub reason: String,
-    pub source: Option<AppId>,
+    pub source: Option<Source>,
     pub enabled: bool,
     pub playback: Option<PlaybackState>,
     pub volume: Option<f32>,
     pub activity: Option<ActivityCause>,
     pub apps: Vec<AppView>,
     pub mic_users: Vec<AppId>,
+    /// Browser tabs reported by the extension. Empty while it is not
+    /// connected.
+    pub tabs: Vec<TabInfo>,
+    pub bridge: BridgeStatus,
     pub errors: Vec<String>,
     /// Most recent last.
     pub events: Vec<Event>,
     /// Set if the audio backend could not start; nothing works then.
     pub fatal: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BridgeStatus {
+    /// A browser extension is connected and paired.
+    pub connected: bool,
+    pub port: u16,
+    /// Set if the bridge could not start (usually the port is taken).
+    pub error: Option<String>,
+}
+
+/// The bridge if it started, otherwise a stand-in that reports no browser,
+/// so the rest of the app works without the extension.
+pub struct Tabs(pub Option<Bridge>);
+
+impl TabBridge for Tabs {
+    fn connected(&mut self) -> bool {
+        self.0.as_mut().is_some_and(|bridge| bridge.connected())
+    }
+
+    fn browser(&mut self) -> AppId {
+        match &mut self.0 {
+            Some(bridge) => bridge.browser(),
+            None => NoTabs.browser(),
+        }
+    }
+
+    fn tabs(&mut self) -> Vec<TabInfo> {
+        self.0
+            .as_mut()
+            .map(|bridge| bridge.tabs())
+            .unwrap_or_default()
+    }
+
+    fn select(&mut self, tab: Option<TabId>) {
+        if let Some(bridge) = &mut self.0 {
+            bridge.select(tab);
+        }
+    }
+
+    fn playback_state(&mut self, tab: TabId) -> BackendResult<PlaybackState> {
+        match &mut self.0 {
+            Some(bridge) => bridge.playback_state(tab),
+            None => NoTabs.playback_state(tab),
+        }
+    }
+
+    fn volume(&mut self, tab: TabId) -> BackendResult<f32> {
+        match &mut self.0 {
+            Some(bridge) => bridge.volume(tab),
+            None => NoTabs.volume(tab),
+        }
+    }
+
+    fn set_volume(&mut self, tab: TabId, volume: f32) -> BackendResult<()> {
+        match &mut self.0 {
+            Some(bridge) => bridge.set_volume(tab, volume),
+            None => NoTabs.set_volume(tab, volume),
+        }
+    }
+
+    fn pause(&mut self, tab: TabId) -> BackendResult<()> {
+        match &mut self.0 {
+            Some(bridge) => bridge.pause(tab),
+            None => NoTabs.pause(tab),
+        }
+    }
+
+    fn play(&mut self, tab: TabId) -> BackendResult<()> {
+        match &mut self.0 {
+            Some(bridge) => bridge.play(tab),
+            None => NoTabs.play(tab),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,7 +147,7 @@ pub struct Event {
 }
 
 enum Message {
-    SetSource(Option<AppId>),
+    SetSource(Option<Source>),
     SetEnabled(bool),
     SetSettings(Settings),
     Shutdown,
@@ -82,7 +162,12 @@ pub struct Service {
 impl Service {
     /// Starts the audio thread. `on_state` is called from that thread
     /// whenever the engine state changes.
-    pub fn start(config: &AppConfig, on_state: impl Fn(State, bool) + Send + 'static) -> Self {
+    pub fn start(
+        config: &AppConfig,
+        tabs: Tabs,
+        bridge: BridgeStatus,
+        on_state: impl Fn(State, bool) + Send + 'static,
+    ) -> Self {
         let status = Arc::new(Mutex::new(Status {
             state: State::Idle,
             reason: String::new(),
@@ -93,6 +178,8 @@ impl Service {
             activity: None,
             apps: Vec::new(),
             mic_users: Vec::new(),
+            tabs: Vec::new(),
+            bridge,
             errors: Vec::new(),
             events: Vec::new(),
             fatal: None,
@@ -103,6 +190,7 @@ impl Service {
             receiver,
             status: Arc::clone(&status),
             config: config.clone(),
+            tabs,
             on_state: Box::new(on_state),
         };
         let thread = thread::Builder::new()
@@ -121,7 +209,7 @@ impl Service {
         self.status.lock().expect("status lock").clone()
     }
 
-    pub fn set_source(&self, source: Option<AppId>) {
+    pub fn set_source(&self, source: Option<Source>) {
         self.send(Message::SetSource(source));
     }
 
@@ -153,6 +241,7 @@ struct Worker {
     receiver: Receiver<Message>,
     status: Arc<Mutex<Status>>,
     config: AppConfig,
+    tabs: Tabs,
     on_state: Box<dyn Fn(State, bool) + Send>,
 }
 
@@ -173,6 +262,7 @@ impl Worker {
         let mut runner = Runner::new(
             audio,
             media,
+            self.tabs,
             SystemClock::new(),
             self.config.settings.clone(),
         );
@@ -203,7 +293,7 @@ impl Worker {
                 match self.receiver.try_recv() {
                     Ok(Message::SetSource(source)) => {
                         note(match &source {
-                            Some(app) => format!("music source set to {app}"),
+                            Some(source) => format!("music source set to {source}"),
                             None => "music source cleared".to_string(),
                         });
                         for error in runner.set_source(source) {
@@ -263,6 +353,8 @@ impl Worker {
                 status.playback = report.playback;
                 status.volume = report.volume;
                 status.activity = report.activity;
+                status.tabs = report.tabs;
+                status.bridge.connected = report.bridge_connected;
                 if let Some(snapshot) = report.snapshot {
                     status.apps = apps;
                     status.mic_users = snapshot.mic_users;

@@ -10,3 +10,4 @@ repository = "https://github.com/hnam0212/cricket"
 [workspace.dependencies]
 cricket-core = { path = "crates/cricket-core" }
 cricket-audio-win = { path = "crates/cricket-audio-win" }
+cricket-bridge = { path = "crates/cricket-bridge" }
