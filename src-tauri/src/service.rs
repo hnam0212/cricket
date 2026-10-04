@@ -42,6 +42,9 @@ pub struct Status {
     /// The source can be seen. `false` while a browser tab has no live
     /// link; the engine then holds its state.
     pub source_available: bool,
+    /// The tab source was picked before the browser was restarted and has to
+    /// be picked again.
+    pub source_stale: bool,
     pub volume: Option<f32>,
     pub activity: Option<ActivityCause>,
     pub apps: Vec<AppView>,
@@ -93,10 +96,20 @@ impl TabBridge for Tabs {
             .unwrap_or_default()
     }
 
-    fn select(&mut self, tab: Option<TabId>) {
+    fn select(&mut self, tab: Option<TabId>, session: Option<&str>) {
         if let Some(bridge) = &mut self.0 {
-            bridge.select(tab);
+            bridge.select(tab, session);
         }
+    }
+
+    fn session(&mut self) -> Option<String> {
+        self.0.as_ref().and_then(Bridge::current_session)
+    }
+
+    fn selection_stale(&mut self) -> bool {
+        self.0
+            .as_mut()
+            .is_some_and(|bridge| bridge.selection_stale())
     }
 
     fn playback_state(&mut self, tab: TabId) -> BackendResult<PlaybackState> {
@@ -188,6 +201,7 @@ impl Service {
             enabled: config.enabled,
             playback: None,
             source_available: true,
+            source_stale: false,
             volume: None,
             activity: None,
             apps: Vec::new(),
@@ -368,6 +382,7 @@ impl Worker {
                 status.enabled = enabled;
                 status.playback = report.playback;
                 status.source_available = report.source_available;
+                status.source_stale = report.source_stale;
                 status.volume = report.volume;
                 status.activity = report.activity;
                 status.tabs = report.tabs;

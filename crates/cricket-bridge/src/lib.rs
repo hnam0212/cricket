@@ -4,6 +4,7 @@
 //! 127.0.0.1, refuses connections from web pages, and requires the pairing
 //! token before it accepts anything else.
 
+pub mod auth;
 pub mod protocol;
 mod server;
 
@@ -11,6 +12,11 @@ pub use server::{Bridge, BrowserInfo, BrowserSource, PeerResolver};
 
 /// The bridge only ever listens on loopback.
 pub const BIND_HOST: &str = "127.0.0.1";
+
+/// The only browser extension allowed to connect. The extension's manifest
+/// carries a fixed public `key`, which makes this ID the same on every
+/// machine and in every Chromium browser.
+pub const EXTENSION_ID: &str = "mhiilanjjpkifklfkkdnkolkmknjddln";
 
 /// Port the extension looks for by default.
 pub const DEFAULT_PORT: u16 = 47835;

@@ -8,6 +8,7 @@ interface ExtensionPanelProps {
   /** Browser executable chosen by the user, if any. */
   browserOverride: string | null;
   onBrowserOverride: (value: string | null) => void;
+  onRegenerateToken: () => void;
 }
 
 /** Chromium browsers the extension can run in, by executable. */
@@ -26,8 +27,10 @@ export function ExtensionPanel({
   token,
   browserOverride,
   onBrowserOverride,
+  onRegenerateToken,
 }: ExtensionPanelProps) {
   const [copied, setCopied] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const copy = () => {
     navigator.clipboard
@@ -66,6 +69,28 @@ export function ExtensionPanel({
           {copied ? strings.copied : strings.copy}
         </button>
         <code className="token">{token}</code>
+        <p className="hint">{strings.extensionTokenHint}</p>
+        {confirming ? (
+          <div className="confirm">
+            <span className="hint">{strings.regenerateWarning}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirming(false);
+                onRegenerateToken();
+              }}
+            >
+              {strings.regenerateConfirm}
+            </button>
+            <button type="button" onClick={() => setConfirming(false)}>
+              {strings.cancel}
+            </button>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setConfirming(true)}>
+            {strings.regenerate}
+          </button>
+        )}
       </div>
       <div className="field">
         <label className="field-label" htmlFor="browser-select">

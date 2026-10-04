@@ -1,21 +1,36 @@
 //! The JSON messages exchanged with the browser extension (SPEC.md 6).
 //!
 //! Every message is an object with a `type` field. Keep this file and
-//! `extension/src/protocol.ts` in step.
+//! `extension/src/background.ts` in step.
+//!
+//! Connection setup: the app sends `challenge`, the extension answers with
+//! `hello` carrying a proof of the pairing token, the app answers with
+//! `hello_ack` carrying its own proof. See [`crate::auth`].
 
 use cricket_core::source::{TabId, TabInfo};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Version 2 replaced sending the token with a challenge-response and
+/// added the browser session. It is not compatible with version 1: the
+/// app and the extension must be updated together.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Extension to app.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
-    /// Must be the first message on a connection.
+    /// Must be the first message on a connection, in answer to `challenge`.
     Hello {
         version: u32,
-        token: String,
+        /// Random value chosen by the extension, 32 hex characters.
+        #[serde(rename = "clientNonce")]
+        client_nonce: String,
+        /// HMAC-SHA256 proof of the pairing token, hex.
+        proof: String,
+        /// Identifies this browser run. Tab ids are only meaningful within
+        /// one, so a saved tab is matched to it.
+        #[serde(default)]
+        session: Option<String>,
         /// Executable name of the browser, for example `chrome.exe`.
         #[serde(default)]
         browser: Option<String>,
@@ -40,11 +55,17 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    /// First message on every connection.
+    Challenge { version: u32, nonce: String },
     /// Answer to `hello`. After `ok: false` the app closes the connection.
     HelloAck {
         ok: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        /// The app's proof of the pairing token, so the extension can tell
+        /// it is talking to Cricket.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        proof: Option<String>,
     },
     /// Which tab is the music source; `null` for none.
     SelectSource {
@@ -78,12 +99,15 @@ mod tests {
     #[test]
     fn parses_hello() {
         let message: ClientMessage =
-            serde_json::from_str(r#"{"type":"hello","version":1,"token":"abc"}"#).unwrap();
+            serde_json::from_str(r#"{"type":"hello","version":2,"clientNonce":"n","proof":"p"}"#)
+                .unwrap();
         assert_eq!(
             message,
             ClientMessage::Hello {
-                version: 1,
-                token: "abc".to_string(),
+                version: 2,
+                client_nonce: "n".to_string(),
+                proof: "p".to_string(),
+                session: None,
                 browser: None
             }
         );
@@ -101,7 +125,6 @@ mod tests {
                 tabs: vec![TabInfo {
                     id: TabId(5),
                     title: "Mix".to_string(),
-                    url: "https://x".to_string(),
                     audible: true
                 }]
             }
@@ -174,10 +197,19 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&ServerMessage::HelloAck {
                 ok: true,
-                error: None
+                error: None,
+                proof: Some("ab".to_string()),
             })
             .unwrap(),
-            r#"{"type":"hello_ack","ok":true}"#
+            r#"{"type":"hello_ack","ok":true,"proof":"ab"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&ServerMessage::Challenge {
+                version: 2,
+                nonce: "n".to_string()
+            })
+            .unwrap(),
+            r#"{"type":"challenge","version":2,"nonce":"n"}"#
         );
     }
 }

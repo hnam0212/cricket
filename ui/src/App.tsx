@@ -84,6 +84,7 @@ export function App() {
             tabs={status.tabs}
             bridge={status.bridge}
             source={status.source}
+            sourceStale={status.source_stale}
             onPick={(source) => apply(api.setSource(source))}
           />
 
@@ -99,6 +100,7 @@ export function App() {
             token={config.bridge_token}
             browserOverride={config.browser_override}
             onBrowserOverride={(value) => apply(api.setBrowserOverride(value))}
+            onRegenerateToken={() => apply(api.regenerateToken())}
           />
 
           <label className="check">

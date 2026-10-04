@@ -7,10 +7,19 @@ interface SourcePickerProps {
   tabs: TabInfo[];
   bridge: BridgeStatus;
   source: Source | null;
+  /** The tab source predates a browser restart and must be picked again. */
+  sourceStale: boolean;
   onPick: (source: Source | null) => void;
 }
 
-export function SourcePicker({ apps, tabs, bridge, source, onPick }: SourcePickerProps) {
+export function SourcePicker({
+  apps,
+  tabs,
+  bridge,
+  source,
+  sourceStale,
+  onPick,
+}: SourcePickerProps) {
   const candidates = apps.filter((app) => !app.is_system_sounds);
   const sourceApp = source?.kind === "app" ? source.app : null;
   const sourceTab = source?.kind === "tab" ? source : null;
@@ -18,7 +27,10 @@ export function SourcePicker({ apps, tabs, bridge, source, onPick }: SourcePicke
   // player often has no audio session; a tab may be closed or the extension
   // not connected), so the choice stays visible.
   const appMissing = sourceApp !== null && !candidates.some((app) => app.app === sourceApp);
-  const tabMissing = sourceTab !== null && !tabs.some((tab) => tab.id === sourceTab.id);
+  // A tab picked before the browser restarted keeps its number, which now
+  // may be a different tab: never show that one as selected.
+  const tabMissing =
+    sourceTab !== null && (sourceStale || !tabs.some((tab) => tab.id === sourceTab.id));
 
   return (
     <section>
@@ -74,17 +86,19 @@ export function SourcePicker({ apps, tabs, bridge, source, onPick }: SourcePicke
             <label className="source">
               <input type="radio" name="source" checked readOnly />
               <span className="source-name">{tabTitle(sourceTab)}</span>
-              <span className="source-note wide">{strings.tabNotAvailable}</span>
+              <span className="source-note wide">
+                {sourceStale ? strings.tabStale : strings.tabNotAvailable}
+              </span>
             </label>
           </li>
         )}
         {tabs.map((tab) => (
           <li key={tab.id}>
-            <label className="source" title={tab.url}>
+            <label className="source">
               <input
                 type="radio"
                 name="source"
-                checked={sourceTab?.id === tab.id}
+                checked={!sourceStale && sourceTab?.id === tab.id}
                 onChange={() => onPick({ kind: "tab", id: tab.id, title: tab.title })}
               />
               <span className="source-name">{tabTitle(tab)}</span>

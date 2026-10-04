@@ -22,6 +22,7 @@ export const strings = {
   tabNotAvailable: "tab not available",
   tabsNotConnected:
     "Connect the Cricket browser extension to pick a tab. See Browser extension below.",
+  tabStale: "Picked before the browser restarted. Pick the tab again.",
   tabsEmpty: "The extension is connected but reported no tabs yet.",
   untitledTab: "(untitled tab)",
   makingSound: "making sound",
@@ -58,6 +59,13 @@ export const strings = {
   },
   extensionToken: "Pairing token",
   extensionPort: "Port",
+  extensionTokenHint:
+    "The token is a shared secret between Cricket and the extension. It is never sent over the connection.",
+  regenerate: "Generate a new token",
+  regenerateWarning:
+    "The extension will disconnect until you paste the new token into its popup.",
+  regenerateConfirm: "Generate",
+  cancel: "Cancel",
   copy: "Copy",
   copied: "Copied",
 
@@ -147,6 +155,13 @@ export function activityText(activity: Activity | null): string {
 /** The headline and the detail line of the status area. */
 /** A browser tab source that cannot be seen right now. Cricket keeps its state meanwhile. */
 function unavailableText(status: Status): { headline: string; detail: string } {
+  if (status.source_stale) {
+    return {
+      headline: "Pick your tab again",
+      detail:
+        "The browser was restarted, so Cricket cannot tell which tab it was. Pick the tab under Music source.",
+    };
+  }
   const reason = status.bridge.connected
     ? "The tab is closed, or needs a reload so the extension can reach its player."
     : "The browser extension is not connected.";
