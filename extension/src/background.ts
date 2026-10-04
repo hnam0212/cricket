@@ -6,7 +6,7 @@
 // Plain script, no imports or exports, so one tsconfig serves this file and
 // the content scripts.
 (() => {
-  const PROTOCOL_VERSION = 1;
+  const PROTOCOL_VERSION = 2;
   const DEFAULT_PORT = 47835;
   const TICK_MS = 250;
   /** Re-arm the music tab this often, so it survives page reloads. */
@@ -21,7 +21,8 @@
   const ALARM = "cricket-reconnect";
 
   type ServerMessage =
-    | { type: "hello_ack"; ok: boolean; error?: string }
+    | { type: "challenge"; version: number; nonce: string }
+    | { type: "hello_ack"; ok: boolean; error?: string; proof?: string }
     | { type: "select_source"; tabId: number | null }
     | {
         type: "command";
@@ -51,12 +52,62 @@
   let ticks = 0;
   let lastPing = 0;
   let tabsTimer: number | undefined;
+  /** Messages are handled one at a time, in order: checking the app's proof
+   *  is asynchronous and what follows it must wait. */
+  let inbox: Promise<void> = Promise.resolve();
+  /** State of the handshake on the current connection. */
+  let handshake: { key: CryptoKey; serverNonce: string; clientNonce: string } | null = null;
 
   const setLink = (state: LinkState, error?: string) =>
     void chrome.storage.session.set({ link: { state, error: error ?? null } });
 
   const send = (message: object) => {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+  };
+
+  // --- Pairing ----------------------------------------------------------
+  //
+  // The token never crosses the connection. The app sends a nonce; this side
+  // answers with an HMAC of both nonces under the token, and the app answers
+  // with a second HMAC, so each proves it knows the token. Keep in step with
+  // crates/cricket-bridge/src/auth.rs.
+
+  const encoder = new TextEncoder();
+
+  const toHex = (bytes: ArrayBuffer | Uint8Array): string =>
+    [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+
+  const fromHex = (hex: string): Uint8Array<ArrayBuffer> | null => {
+    if (hex.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(hex)) return null;
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    return bytes;
+  };
+
+  const randomNonce = (): string => toHex(crypto.getRandomValues(new Uint8Array(16)));
+
+  const importKey = (token: string) =>
+    crypto.subtle.importKey(
+      "raw",
+      encoder.encode(token),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign", "verify"],
+    );
+
+  const proofMessage = (role: string, serverNonce: string, clientNonce: string) =>
+    encoder.encode(`${role}:${serverNonce}:${clientNonce}`);
+
+  /** Identifies this browser run. Tab ids are only unique within one, so the
+   *  app uses it to tell a saved tab from a different tab that got the same
+   *  number after a restart. Session storage lives exactly as long as the
+   *  browser run and survives the service worker being stopped. */
+  const sessionId = async (): Promise<string> => {
+    const stored = await chrome.storage.session.get("sessionId");
+    if (typeof stored.sessionId === "string") return stored.sessionId;
+    const id = crypto.randomUUID();
+    await chrome.storage.session.set({ sessionId: id });
+    return id;
   };
 
   const browserExe = (): string => {
@@ -85,21 +136,20 @@
     const ws = new WebSocket(`ws://127.0.0.1:${port}`);
     socket = ws;
 
-    ws.onopen = () =>
-      ws.send(
-        JSON.stringify({
-          type: "hello",
-          version: PROTOCOL_VERSION,
-          token,
-          browser: browserExe(),
-        }),
-      );
+    handshake = null;
+    inbox = Promise.resolve();
+    // The app speaks first (a challenge); nothing is sent until then.
     ws.onmessage = (event) => {
+      let message: ServerMessage;
       try {
-        handle(JSON.parse(String(event.data)) as ServerMessage);
+        message = JSON.parse(String(event.data)) as ServerMessage;
       } catch {
-        // Not JSON, or a message type this version does not know.
+        return; // Not JSON.
       }
+      inbox = inbox
+        .then(() => (socket === ws ? handle(message, ws, token) : undefined))
+        // A message type this version does not know, or a failed check.
+        .catch(() => undefined);
     };
     ws.onclose = () => {
       if (socket !== ws) return;
@@ -133,19 +183,69 @@
     void connect();
   };
 
-  const handle = (message: ServerMessage) => {
+  const reject = (ws: WebSocket, error: string) => {
+    rejected = true;
+    setLink("rejected", error);
+    ws.close();
+  };
+
+  const handle = async (message: ServerMessage, ws: WebSocket, token: string) => {
     switch (message.type) {
-      case "hello_ack":
-        if (message.ok) {
-          paired = true;
-          retryMs = RETRY_MIN_MS;
-          setLink("connected");
-          void sendTabs();
-        } else {
-          rejected = true;
-          setLink("rejected", message.error);
+      case "challenge": {
+        if (message.version !== PROTOCOL_VERSION) {
+          reject(
+            ws,
+            `Cricket speaks protocol ${message.version}, this extension ${PROTOCOL_VERSION}. Update both.`,
+          );
+          break;
         }
+        const key = await importKey(token);
+        const clientNonce = randomNonce();
+        handshake = { key, serverNonce: message.nonce, clientNonce };
+        const proof = await crypto.subtle.sign(
+          "HMAC",
+          key,
+          proofMessage("cricket-v2-client", message.nonce, clientNonce),
+        );
+        ws.send(
+          JSON.stringify({
+            type: "hello",
+            version: PROTOCOL_VERSION,
+            clientNonce,
+            proof: toHex(proof),
+            session: await sessionId(),
+            browser: browserExe(),
+          }),
+        );
         break;
+      }
+      case "hello_ack": {
+        if (!message.ok) {
+          reject(ws, message.error ?? "The app refused the connection.");
+          break;
+        }
+        // The app must prove it knows the token too: otherwise whatever
+        // holds the port could feed this extension commands.
+        const expected = handshake && message.proof ? fromHex(message.proof) : null;
+        const genuine =
+          handshake !== null &&
+          expected !== null &&
+          (await crypto.subtle.verify(
+            "HMAC",
+            handshake.key,
+            expected,
+            proofMessage("cricket-v2-server", handshake.serverNonce, handshake.clientNonce),
+          ));
+        if (!genuine) {
+          reject(ws, "The app on this port could not prove it is Cricket. Is something else using it?");
+          break;
+        }
+        paired = true;
+        retryMs = RETRY_MIN_MS;
+        setLink("connected");
+        void sendTabs();
+        break;
+      }
       case "select_source":
         selectSource(message.tabId);
         break;
@@ -166,8 +266,9 @@
         .filter((tab) => tab.id !== undefined)
         .map((tab) => ({
           id: tab.id,
+          // Only what Cricket needs: a title to pick by and the sound flag.
+          // Addresses stay in the browser.
           title: tab.title ?? "",
-          url: tab.url ?? "",
           audible: tab.audible ?? false,
         })),
     });
@@ -187,7 +288,6 @@
     if (
       change.audible !== undefined ||
       change.title !== undefined ||
-      change.url !== undefined ||
       change.status !== undefined
     ) {
       scheduleTabs();

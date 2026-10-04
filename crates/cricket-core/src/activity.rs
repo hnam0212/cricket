@@ -222,7 +222,6 @@ mod tests {
         TabInfo {
             id: TabId(id),
             title: title.to_string(),
-            url: String::new(),
             audible,
         }
     }

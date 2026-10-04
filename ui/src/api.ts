@@ -17,12 +17,19 @@ export type Activity =
   | { kind: "tab"; title: string };
 
 /** The music source: a desktop app or one browser tab. */
-export type Source = { kind: "app"; app: string } | { kind: "tab"; id: number; title: string };
+export type Source =
+  | { kind: "app"; app: string }
+  | {
+      kind: "tab";
+      id: number;
+      title: string;
+      /** Which browser run the id belongs to. Filled in by the app when picking. */
+      session?: string;
+    };
 
 export interface TabInfo {
   id: number;
   title: string;
-  url: string;
   audible: boolean;
 }
 
@@ -57,6 +64,8 @@ export interface Status {
   playback: PlaybackState | null;
   /** False while a browser tab has no live link; Cricket holds its state. */
   source_available: boolean;
+  /** The tab was picked before a browser restart; it must be picked again. */
+  source_stale: boolean;
   volume: number | null;
   activity: Activity | null;
   apps: AppView[];
@@ -100,6 +109,7 @@ export const api = {
   setMinimizeToTray: (value: boolean) => invoke<AppConfig>("set_minimize_to_tray", { value }),
   setShowDiagnostics: (value: boolean) => invoke<AppConfig>("set_show_diagnostics", { value }),
   setMiniMode: (value: boolean) => invoke<AppConfig>("set_mini_mode", { value }),
+  regenerateToken: () => invoke<AppConfig>("regenerate_token"),
   setBrowserOverride: (value: string | null) =>
     invoke<AppConfig>("set_browser_override", { value }),
 };

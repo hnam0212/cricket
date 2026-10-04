@@ -52,6 +52,21 @@ fn set_source(app: State<App>, source: Option<Source>) -> AppConfig {
         Source::App { app } => *app != AppId::new(""),
         Source::Tab { .. } => true,
     });
+    // A tab id only means something in the browser run it was picked in:
+    // remember which one, so a restart is noticed instead of trusting an id
+    // that may now be another tab.
+    let source = match source {
+        Some(Source::Tab {
+            id,
+            title,
+            session: None,
+        }) => Some(Source::Tab {
+            id,
+            title,
+            session: app.bridge.as_ref().and_then(Bridge::current_session),
+        }),
+        other => other,
+    };
     app.service.set_source(source.clone());
     app.store.update(|config| config.source = source)
 }
@@ -66,6 +81,17 @@ fn set_settings(app: State<App>, settings: Settings) -> AppConfig {
     let settings = settings.sanitized();
     app.service.set_settings(settings.clone());
     app.store.update(|config| config.settings = settings)
+}
+
+/// Replaces the pairing token. The extension is disconnected and has to be
+/// given the new one.
+#[tauri::command]
+fn regenerate_token(app: State<App>) -> Result<AppConfig, String> {
+    let token = cricket_bridge::generate_token().map_err(|error| error.to_string())?;
+    if let Some(bridge) = &app.bridge {
+        bridge.set_token(token.clone());
+    }
+    Ok(app.store.update(|config| config.bridge_token = token))
 }
 
 /// Pins the browser executable when detection picks the wrong one; `None`
@@ -298,6 +324,7 @@ pub fn run() {
             set_show_diagnostics,
             set_mini_mode,
             set_browser_override,
+            regenerate_token,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Cricket app")

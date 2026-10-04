@@ -76,24 +76,27 @@ Transitions:
 ## 6. Chrome extension
 
 - Manifest V3. Connects to the desktop app over WebSocket on 127.0.0.1 using a pairing token.
-- Reports the list of tabs (id, title, favicon, audible) whenever it changes.
+- Reports the list of tabs (id, title, audible) whenever it changes. Tab addresses are not sent.
 - Receives commands: select music tab, pause, resume, fade volume.
 - Pause and resume through an injected script on the music tab, handling media elements and fading `element.volume`.
 - Known risk: some sites do not respond cleanly to a direct pause. Test early with the sites the user actually uses (YouTube, YouTube Music, Spotify Web).
 
 Protocol (JSON messages, versioned):
 
-- Extension to app: `hello {version, token, browser?}`, `tabs {tabs:[{id,title,url,audible}]}`, `source_state {tabId, playing, volume?}`, `ping {}`
-- App to extension: `hello_ack {ok, error?}`, `select_source {tabId|null}`, `command {cmd:"pause"|"resume"|"set_volume", tabId, volume?, fadeMs?}`
+- App to extension, first: `challenge {version, nonce}`
+- Extension to app: `hello {version, clientNonce, proof, session?, browser?}`, `tabs {tabs:[{id,title,audible}]}`, `source_state {tabId, playing, volume?}`, `ping {}`
+- App to extension: `hello_ack {ok, error?, proof?}`, `select_source {tabId|null}`, `command {cmd:"pause"|"resume"|"set_volume", tabId, volume?, fadeMs?}`
 
 Notes on the protocol as built:
 
-- Every message carries a `type` field with the name shown above. `hello` must come first; anything else, a wrong token or an unsupported version gets `hello_ack {ok:false}` and the connection is closed.
-- The app refuses WebSocket connections whose `Origin` is not an extension, so web pages cannot reach it even with a token.
+- Every message carries a `type` field with the name shown above. The app speaks first with `challenge`; `hello` must come next. Anything else, a wrong proof or an unsupported version gets `hello_ack {ok:false}` and the connection is closed.
+- Pairing (protocol 2): the token is never sent. `proof` is hex HMAC-SHA256 keyed with the token over `"cricket-v2-client:" + serverNonce + ":" + clientNonce`; the app's `hello_ack.proof` is the same over `"cricket-v2-server:"...`. Each side checks the other's proof, so the extension does not take commands from something else on the port. Protocol 1 and 2 are not compatible; update app and extension together.
+- The app only accepts connections whose `Origin` is exactly `chrome-extension://<Cricket's extension id>` (the manifest carries a fixed `key`, so the id is the same everywhere). Web pages and other extensions are refused before any message is read. Messages are capped at 1 MiB, `hello` at 4 KiB, and at most 8 connections are open at once.
+- The pairing token can be replaced from the app ("Generate a new token"); the extension is disconnected and needs the new token.
 - `browser` is the executable hosting the tabs (default `chrome.exe`); the desktop side ignores that process while a tab is the source.
 - `source_state.volume` is absent when the page has no media the extension can reach; the app then pauses without fading.
 - The app drives fades itself with repeated `set_volume` commands, so they can reverse mid-way. `fadeMs` is reserved.
-- A tab id only lives as long as the browser session, so a saved tab source has to be picked again after the browser restarts.
+- A tab id only lives as long as the browser run. The extension sends a `session` id (random, kept in `chrome.storage.session`, so it survives the service worker stopping but not a browser restart). A saved tab source remembers the session it was picked in; if the connected session differs, the tab is not selected, the engine holds, and the UI asks to pick the tab again.
 
 ## 7. Architecture
 
