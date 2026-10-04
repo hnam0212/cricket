@@ -24,6 +24,7 @@ const MINI_SIZE: LogicalSize<f64> = LogicalSize::new(460.0, 150.0);
 
 struct App {
     service: Service,
+    bridge: Option<Bridge>,
     store: ConfigStore,
     /// The tray's "Enabled" item, kept so it can follow the window's switch.
     tray_enabled: Mutex<Option<CheckMenuItem<Wry>>>,
@@ -65,6 +66,19 @@ fn set_settings(app: State<App>, settings: Settings) -> AppConfig {
     let settings = settings.sanitized();
     app.service.set_settings(settings.clone());
     app.store.update(|config| config.settings = settings)
+}
+
+/// Pins the browser executable when detection picks the wrong one; `None`
+/// (or empty) goes back to detection.
+#[tauri::command]
+fn set_browser_override(app: State<App>, value: Option<String>) -> AppConfig {
+    let value = value
+        .map(|name| name.trim().to_lowercase())
+        .filter(|name| !name.is_empty());
+    if let Some(bridge) = &app.bridge {
+        bridge.set_browser_override(value.as_deref().map(AppId::new));
+    }
+    app.store.update(|config| config.browser_override = value)
 }
 
 #[tauri::command]
@@ -177,6 +191,19 @@ fn build_tray(handle: &AppHandle, enabled: bool) -> tauri::Result<CheckMenuItem<
     Ok(enabled_item)
 }
 
+/// How the bridge learns which browser an extension connection comes from.
+#[cfg(windows)]
+fn peer_resolver() -> Option<cricket_bridge::PeerResolver> {
+    Some(std::sync::Arc::new(|peer, server_port| {
+        cricket_audio_win::client_process(peer, server_port)
+    }))
+}
+
+#[cfg(not(windows))]
+fn peer_resolver() -> Option<cricket_bridge::PeerResolver> {
+    None
+}
+
 pub fn run() {
     tauri::Builder::default()
         // Must be the first plugin. Two copies would both drive the same
@@ -198,22 +225,31 @@ pub fn run() {
             // The app works without the bridge (desktop app sources), so a
             // port that is already taken is reported, not fatal.
             let port = cricket_bridge::DEFAULT_PORT;
-            let (bridge, bridge_error) = match Bridge::start(port, config.bridge_token.clone()) {
-                Ok(bridge) => (Some(bridge), None),
-                Err(error) => {
-                    eprintln!("bridge: could not listen on 127.0.0.1:{port}: {error}");
-                    (None, Some(error.to_string()))
-                }
-            };
+            let resolver = peer_resolver();
+            let (bridge, bridge_error) =
+                match Bridge::start_with(port, config.bridge_token.clone(), resolver) {
+                    Ok(bridge) => {
+                        bridge.set_browser_override(
+                            config.browser_override.as_deref().map(AppId::new),
+                        );
+                        (Some(bridge), None)
+                    }
+                    Err(error) => {
+                        eprintln!("bridge: could not listen on 127.0.0.1:{port}: {error}");
+                        (None, Some(error.to_string()))
+                    }
+                };
 
             let tray_handle = handle.clone();
             let service = Service::start(
                 &config,
-                Tabs(bridge),
+                Tabs(bridge.clone()),
                 BridgeStatus {
                     connected: false,
                     port,
                     error: bridge_error,
+                    browser: None,
+                    browser_source: None,
                 },
                 move |state, has_source| {
                     if let Some(tray) = tray_handle.tray_by_id(TRAY_ID) {
@@ -224,6 +260,7 @@ pub fn run() {
 
             app.manage(App {
                 service,
+                bridge,
                 store,
                 tray_enabled: Mutex::new(None),
             });
@@ -260,6 +297,7 @@ pub fn run() {
             set_minimize_to_tray,
             set_show_diagnostics,
             set_mini_mode,
+            set_browser_override,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Cricket app")

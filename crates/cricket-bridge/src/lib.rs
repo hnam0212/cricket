@@ -7,7 +7,7 @@
 pub mod protocol;
 mod server;
 
-pub use server::Bridge;
+pub use server::{Bridge, BrowserInfo, BrowserSource, PeerResolver};
 
 /// The bridge only ever listens on loopback.
 pub const BIND_HOST: &str = "127.0.0.1";

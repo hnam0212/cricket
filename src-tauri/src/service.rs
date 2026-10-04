@@ -64,6 +64,10 @@ pub struct BridgeStatus {
     pub port: u16,
     /// Set if the bridge could not start (usually the port is taken).
     pub error: Option<String>,
+    /// Executable of the browser whose sound is ignored for a tab source.
+    pub browser: Option<String>,
+    /// How that was decided: chosen, detected, reported or assumed.
+    pub browser_source: Option<String>,
 }
 
 /// The bridge if it started, otherwise a stand-in that reports no browser,
@@ -269,6 +273,8 @@ impl Worker {
             }
         };
 
+        // Kept to read which browser is connected; the runner owns `tabs`.
+        let bridge = self.tabs.0.clone();
         let mut runner = Runner::new(
             audio,
             media,
@@ -366,6 +372,11 @@ impl Worker {
                 status.activity = report.activity;
                 status.tabs = report.tabs;
                 status.bridge.connected = report.bridge_connected;
+                if let Some(bridge) = &bridge {
+                    let info = bridge.browser_info();
+                    status.bridge.browser = Some(info.app.to_string());
+                    status.bridge.browser_source = Some(info.source.as_str().to_string());
+                }
                 if let Some(snapshot) = report.snapshot {
                     status.apps = apps;
                     status.mic_users = snapshot.mic_users;

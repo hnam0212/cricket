@@ -29,6 +29,9 @@ pub struct AppConfig {
     /// Secret the browser extension must present. Empty until the app
     /// generates one on first start.
     pub bridge_token: String,
+    /// Browser executable chosen by the user when automatic detection picks
+    /// the wrong one (for example `brave.exe`). `None` means detect.
+    pub browser_override: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -42,6 +45,7 @@ impl Default for AppConfig {
             mini_mode: false,
             show_diagnostics: false,
             bridge_token: String::new(),
+            browser_override: None,
         }
     }
 }

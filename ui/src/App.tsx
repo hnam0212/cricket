@@ -94,7 +94,12 @@ export function App() {
             onMinimizeToTray={(value) => apply(api.setMinimizeToTray(value))}
           />
 
-          <ExtensionPanel bridge={status.bridge} token={config.bridge_token} />
+          <ExtensionPanel
+            bridge={status.bridge}
+            token={config.bridge_token}
+            browserOverride={config.browser_override}
+            onBrowserOverride={(value) => apply(api.setBrowserOverride(value))}
+          />
 
           <label className="check">
             <input

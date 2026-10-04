@@ -30,6 +30,9 @@ export interface BridgeStatus {
   connected: boolean;
   port: number;
   error: string | null;
+  /** Executable of the browser whose sound is ignored for a tab source. */
+  browser: string | null;
+  browser_source: "chosen" | "detected" | "reported" | "assumed" | null;
 }
 
 export interface AppView {
@@ -84,6 +87,7 @@ export interface AppConfig {
   mini_mode: boolean;
   show_diagnostics: boolean;
   bridge_token: string;
+  browser_override: string | null;
 }
 
 export const api = {
@@ -96,4 +100,6 @@ export const api = {
   setMinimizeToTray: (value: boolean) => invoke<AppConfig>("set_minimize_to_tray", { value }),
   setShowDiagnostics: (value: boolean) => invoke<AppConfig>("set_show_diagnostics", { value }),
   setMiniMode: (value: boolean) => invoke<AppConfig>("set_mini_mode", { value }),
+  setBrowserOverride: (value: string | null) =>
+    invoke<AppConfig>("set_browser_override", { value }),
 };

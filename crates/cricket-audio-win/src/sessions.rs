@@ -298,7 +298,7 @@ fn open_session(control: &IAudioSessionControl) -> windows::core::Result<Session
 
 /// Executable name of a process, or `None` if it cannot be opened (already
 /// exited, or protected).
-fn process_name(pid: u32) -> Option<AppId> {
+pub(crate) fn process_name(pid: u32) -> Option<AppId> {
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
         let mut buffer = [0u16; 1024];

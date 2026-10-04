@@ -37,6 +37,12 @@ export function Diagnostics({ status }: DiagnosticsProps) {
               ? strings.extensionConnected
               : strings.extensionNotConnected)}
         </dd>
+        <dt>{strings.engineBrowser}</dt>
+        <dd>
+          {status.bridge.browser
+            ? `${status.bridge.browser} (${strings.browserSource(status.bridge.browser_source)})`
+            : strings.unavailable}
+        </dd>
         <dt>{strings.microphone}</dt>
         <dd>
           {status.mic_users.length > 0
