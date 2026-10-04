@@ -175,6 +175,12 @@ fn build_tray(handle: &AppHandle, enabled: bool) -> tauri::Result<CheckMenuItem<
 
 pub fn run() {
     tauri::Builder::default()
+        // Must be the first plugin. Two copies would both drive the same
+        // music source, and switching one off would leave the other
+        // pausing it. A second launch shows the running window instead.
+        .plugin(tauri_plugin_single_instance::init(|handle, _args, _cwd| {
+            show_window(handle);
+        }))
         .setup(|app| {
             let handle = app.handle().clone();
             let store = ConfigStore::load(app.path().app_config_dir()?.join("config.json"));
