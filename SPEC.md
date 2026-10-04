@@ -128,7 +128,7 @@ Each phase ends with a manual test checklist for the user. Do not start the next
 ### Phase 2: Engine
 - [x] Pure state machine with fake clock; unit tests for every scenario in section 4 and every transition in 5.2, including mid-fade reversal and the user-pause rule.
 - [x] Wire engine to the Windows backend in a headless run mode with detailed logs.
-- [ ] Manual test: scenario 3 end to end (app source) in the headless mode.
+- [x] Manual test: scenario 3 end to end (app source) in the headless mode.
 
 ### Phase 3: UI
 - [ ] Source picker, on/off, status, settings panel, tray, mini mode, persistence, diagnostics view.
