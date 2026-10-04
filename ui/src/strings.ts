@@ -22,6 +22,9 @@ export const strings = {
   tabNotAvailable: "tab not available",
   tabsNotConnected:
     "Connect the Cricket browser extension to pick a tab. See Browser extension below.",
+  tabNeedsPermission: "allow the site first",
+  tabNeedsPermissionHint:
+    "Cricket cannot control music on this site yet. Open the tab, click the Cricket icon in the toolbar and choose Allow.",
   tabStale: "Picked before the browser restarted. Pick the tab again.",
   tabsEmpty: "The extension is connected but reported no tabs yet.",
   untitledTab: "(untitled tab)",

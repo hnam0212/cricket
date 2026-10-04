@@ -259,17 +259,19 @@
 
   const sendTabs = async () => {
     if (!paired) return;
-    const tabs = await chrome.tabs.query({});
+    const [tabs, patterns] = await Promise.all([chrome.tabs.query({}), coveredPatterns()]);
     send({
       type: "tabs",
       tabs: tabs
         .filter((tab) => tab.id !== undefined)
         .map((tab) => ({
           id: tab.id,
-          // Only what Cricket needs: a title to pick by and the sound flag.
-          // Addresses stay in the browser.
+          // Only what Cricket needs: a title to pick by, the sound flag and
+          // whether this extension can control the page. Addresses stay in
+          // the browser.
           title: tab.title ?? "",
           audible: tab.audible ?? false,
+          controllable: isCovered(patterns, tab.url ?? ""),
         })),
     });
   };
@@ -296,6 +298,114 @@
     // it is the music source yet.
     if (tabId === sourceTabId && change.status === "complete") arm(tabId, true);
   });
+
+  // --- Which sites the extension may control ----------------------------
+  //
+  // The page scripts are not injected everywhere. They run on a short list of
+  // music sites (the manifest's content_scripts) and on sites the user
+  // allowed from the popup (optional host permissions plus a registered
+  // content script). Any other tab still counts as activity through
+  // Chrome's own "audible" flag; it just cannot be the music source.
+
+  const defaultPatterns = (): string[] =>
+    chrome.runtime.getManifest().content_scripts?.[0]?.matches ?? [];
+
+  const grantedPatterns = async (): Promise<string[]> =>
+    (await chrome.permissions.getAll()).origins ?? [];
+
+  const coveredPatterns = async (): Promise<string[]> => [
+    ...defaultPatterns(),
+    ...(await grantedPatterns()),
+  ];
+
+  /** Whether a Chrome match pattern (`*://*.example.com/*`) covers a URL. */
+  const patternMatches = (pattern: string, url: URL): boolean => {
+    const parts = /^(\*|https?):\/\/([^/]+)\/(.*)$/.exec(pattern);
+    if (!parts) return false;
+    const [, scheme, host, path] = parts;
+    if (scheme === "*" ? !/^https?:$/.test(url.protocol) : `${scheme}:` !== url.protocol) {
+      return false;
+    }
+    const hostOk =
+      host === "*" ||
+      (host.startsWith("*.")
+        ? url.hostname === host.slice(2) || url.hostname.endsWith(host.slice(1))
+        : url.hostname === host);
+    if (!hostOk) return false;
+    const escaped = path.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+    return new RegExp(`^/${escaped}$`).test(url.pathname + url.search);
+  };
+
+  const isCovered = (patterns: string[], address: string): boolean => {
+    let url: URL;
+    try {
+      url = new URL(address);
+    } catch {
+      return false;
+    }
+    return patterns.some((pattern) => patternMatches(pattern, url));
+  };
+
+  /** The two patterns that make up "this site": the host and its subdomains. */
+  const sitePatterns = (host: string) => [`*://${host}/*`, `*://*.${host}/*`];
+
+  const registeredIds = (host: string) => [`cricket-hook-${host}`, `cricket-relay-${host}`];
+
+  const registerSite = async (host: string, tabId: number | undefined) => {
+    const matches = sitePatterns(host);
+    const [hookId, relayId] = registeredIds(host);
+    // Registering the same id twice fails; start clean.
+    await chrome.scripting.unregisterContentScripts({ ids: [hookId, relayId] }).catch(() => undefined);
+    await chrome.scripting.registerContentScripts([
+      {
+        id: hookId,
+        matches,
+        js: ["dist/hook.js"],
+        runAt: "document_start",
+        allFrames: true,
+        world: "MAIN",
+        persistAcrossSessions: true,
+      },
+      {
+        id: relayId,
+        matches,
+        js: ["dist/relay.js"],
+        runAt: "document_start",
+        allFrames: true,
+        persistAcrossSessions: true,
+      },
+    ]);
+    // The page that is open now was loaded without them: add them in place,
+    // so it works without a reload (except for players the page created
+    // before this moment and never attached to the document).
+    if (tabId !== undefined) {
+      const target = { tabId, allFrames: true };
+      await chrome.scripting
+        .executeScript({ target, files: ["dist/hook.js"], world: "MAIN" })
+        .catch(() => undefined);
+      await chrome.scripting
+        .executeScript({ target, files: ["dist/relay.js"] })
+        .catch(() => undefined);
+    }
+    scheduleTabs();
+  };
+
+  const forgetSite = async (host: string) => {
+    await chrome.scripting
+      .unregisterContentScripts({ ids: registeredIds(host) })
+      .catch(() => undefined);
+    await chrome.permissions.remove({ origins: sitePatterns(host) }).catch(() => undefined);
+    scheduleTabs();
+  };
+
+  /** Hosts the user allowed, from the granted patterns. */
+  const allowedHosts = async (): Promise<string[]> =>
+    (await grantedPatterns())
+      .map((pattern) => /^\*:\/\/([^*/]+)\/\*$/.exec(pattern)?.[1])
+      .filter((host): host is string => host !== undefined);
+
+  chrome.permissions.onRemoved.addListener(scheduleTabs);
+  chrome.permissions.onAdded.addListener(scheduleTabs);
 
   // --- The music tab ----------------------------------------------------
 
@@ -360,6 +470,23 @@
     if (message?.type === "cricket-settings-changed") {
       reconnect();
       sendResponse(true);
+    }
+    if (message?.type === "cricket-site-status" && typeof message.url === "string") {
+      void Promise.all([coveredPatterns(), allowedHosts()]).then(([patterns, allowed]) =>
+        sendResponse({ covered: isCovered(patterns, message.url), allowed }),
+      );
+      return true; // the answer is asynchronous
+    }
+    if (message?.type === "cricket-allow-site" && typeof message.host === "string") {
+      void registerSite(message.host, message.tabId).then(
+        () => sendResponse(true),
+        () => sendResponse(false),
+      );
+      return true;
+    }
+    if (message?.type === "cricket-forget-site" && typeof message.host === "string") {
+      void forgetSite(message.host).then(() => sendResponse(true));
+      return true;
     }
     return false;
   });

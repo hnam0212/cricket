@@ -76,6 +76,7 @@ Transitions:
 ## 6. Chrome extension
 
 - Manifest V3. Connects to the desktop app over WebSocket on 127.0.0.1 using a pairing token.
+- Page scripts run only on a default list of music sites (the manifest's `content_scripts`) and on sites the user allows from the popup (`optional_host_permissions` plus a registered content script). Tabs on other sites still count as activity through the browser's audible flag but cannot be the music source; the tab list marks them `controllable: false`.
 - Reports the list of tabs (id, title, audible) whenever it changes. Tab addresses are not sent.
 - Receives commands: select music tab, pause, resume, fade volume.
 - Pause and resume through an injected script on the music tab, handling media elements and fading `element.volume`.

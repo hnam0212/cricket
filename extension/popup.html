@@ -44,6 +44,32 @@
       #status[data-state="rejected"] {
         border-left-color: #b3261e;
       }
+      #site {
+        margin: 8px 0 0;
+        padding-top: 8px;
+        border-top: 1px solid #8884;
+      }
+      #site p {
+        margin: 0;
+      }
+      #sites {
+        margin: 6px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      #sites li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 4px;
+      }
+      #sites button {
+        margin: 0;
+        padding: 1px 8px;
+      }
+      details {
+        margin-top: 8px;
+      }
       #note {
         min-height: 1.2em;
         margin: 6px 0 0;
@@ -54,6 +80,14 @@
   <body>
     <h1>Cricket</h1>
     <p id="status" role="status"></p>
+    <section id="site" hidden>
+      <p id="site-text"></p>
+      <button id="site-allow" type="button" hidden></button>
+      <details id="allowed" hidden>
+        <summary>Allowed sites</summary>
+        <ul id="sites"></ul>
+      </details>
+    </section>
     <form id="form">
       <label>
         Pairing token
