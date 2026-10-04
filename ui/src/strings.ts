@@ -40,6 +40,22 @@ export const strings = {
     "Click the Cricket icon in the toolbar, paste the pairing token below and save.",
     "Reload the tab that plays your music, then pick it under Music source.",
   ],
+  extensionBrowser: "Browser",
+  extensionBrowserAuto: "Detect automatically",
+  extensionBrowserWhy:
+    "Sound from this browser is not counted as other activity while a tab is your music source.",
+  browserSource: (source: string | null) => {
+    switch (source) {
+      case "chosen":
+        return "chosen by you";
+      case "detected":
+        return "detected";
+      case "reported":
+        return "guessed by the extension";
+      default:
+        return "assumed until the extension connects";
+    }
+  },
   extensionToken: "Pairing token",
   extensionPort: "Port",
   copy: "Copy",
@@ -88,6 +104,7 @@ export const strings = {
   engineVolume: "Source volume",
   engineActivity: "Activity",
   engineExtension: "Browser extension",
+  engineBrowser: "Browser",
   none: "none",
   unavailable: "unavailable",
   noEvents: "Nothing logged yet.",

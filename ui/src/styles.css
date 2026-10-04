@@ -264,6 +264,16 @@ button.link {
   color: var(--muted);
 }
 
+select {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 6px;
+  max-width: 220px;
+}
+
 input[type="number"] {
   font: inherit;
   color: inherit;

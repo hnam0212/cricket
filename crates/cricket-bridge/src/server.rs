@@ -1,5 +1,5 @@
 use std::io::ErrorKind;
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -25,6 +25,41 @@ const READ_SLICE: Duration = Duration::from_millis(10);
 const SOURCE_STATE_MAX_AGE: Duration = Duration::from_secs(3);
 const DEFAULT_BROWSER: &str = "chrome.exe";
 
+/// Finds the browser executable that owns the client end of a connection.
+/// Given the client's address as the server sees it and the server's port.
+/// Platform specific, so the app supplies it.
+pub type PeerResolver = Arc<dyn Fn(SocketAddr, u16) -> Option<AppId> + Send + Sync>;
+
+/// Where the browser executable Cricket uses came from, strongest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserSource {
+    /// The user picked it.
+    Chosen,
+    /// Found from the extension's connection to Cricket.
+    Detected,
+    /// Guessed by the extension from its user agent.
+    Reported,
+    /// Nothing known; the default.
+    Assumed,
+}
+
+impl BrowserSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Chosen => "chosen",
+            Self::Detected => "detected",
+            Self::Reported => "reported",
+            Self::Assumed => "assumed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserInfo {
+    pub app: AppId,
+    pub source: BrowserSource,
+}
+
 /// The running bridge. Cheap to clone; all clones share one server.
 #[derive(Clone)]
 pub struct Bridge {
@@ -34,6 +69,10 @@ pub struct Bridge {
 
 struct Shared {
     token: String,
+    port: u16,
+    resolver: Option<PeerResolver>,
+    /// Set by the user when detection picks the wrong browser.
+    browser_override: Mutex<Option<AppId>>,
     state: Mutex<State>,
 }
 
@@ -51,7 +90,7 @@ struct Client {
     outgoing: Sender<ServerMessage>,
     /// Messages queued for the socket and not yet written to it.
     pending: Arc<AtomicUsize>,
-    browser: AppId,
+    browser: BrowserInfo,
     tabs: Vec<TabInfo>,
     source: Option<SourceState>,
 }
@@ -66,10 +105,23 @@ struct SourceState {
 impl Bridge {
     /// Starts listening on 127.0.0.1. Port 0 picks a free port.
     pub fn start(port: u16, token: String) -> std::io::Result<Self> {
+        Self::start_with(port, token, None)
+    }
+
+    /// Like [`Bridge::start`], with a way to find which browser a
+    /// connection comes from.
+    pub fn start_with(
+        port: u16,
+        token: String,
+        resolver: Option<PeerResolver>,
+    ) -> std::io::Result<Self> {
         let listener = TcpListener::bind((BIND_HOST, port))?;
         let port = listener.local_addr()?.port();
         let shared = Arc::new(Shared {
             token,
+            port,
+            resolver,
+            browser_override: Mutex::new(None),
             state: Mutex::new(State::default()),
         });
 
@@ -92,6 +144,41 @@ impl Bridge {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Use this browser executable instead of the detected one. `None`
+    /// goes back to detection.
+    pub fn set_browser_override(&self, browser: Option<AppId>) {
+        *self
+            .shared
+            .browser_override
+            .lock()
+            .expect("browser override lock") = browser;
+    }
+
+    /// The browser whose sound is ignored while a tab is the source, and
+    /// how that was decided.
+    pub fn browser_info(&self) -> BrowserInfo {
+        let chosen = self
+            .shared
+            .browser_override
+            .lock()
+            .expect("browser override lock")
+            .clone();
+        if let Some(app) = chosen {
+            return BrowserInfo {
+                app,
+                source: BrowserSource::Chosen,
+            };
+        }
+        self.state()
+            .client
+            .as_ref()
+            .map(|client| client.browser.clone())
+            .unwrap_or_else(|| BrowserInfo {
+                app: AppId::new(DEFAULT_BROWSER),
+                source: BrowserSource::Assumed,
+            })
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -158,11 +245,7 @@ impl TabBridge for Bridge {
     }
 
     fn browser(&mut self) -> AppId {
-        self.state()
-            .client
-            .as_ref()
-            .map(|client| client.browser.clone())
-            .unwrap_or_else(|| AppId::new(DEFAULT_BROWSER))
+        self.browser_info().app
     }
 
     fn tabs(&mut self) -> Vec<TabInfo> {
@@ -216,11 +299,30 @@ fn serve(stream: TcpStream, shared: &Shared) {
     if stream.set_read_timeout(Some(HELLO_TIMEOUT)).is_err() {
         return;
     }
+    let peer = stream.peer_addr().ok();
     let Ok(mut socket) = tungstenite::accept_hdr(stream, check_origin) else {
         return;
     };
-    let Some(browser) = pair(&mut socket, shared) else {
+    let Some(reported) = pair(&mut socket, shared) else {
         return;
+    };
+    // Resolve now, while the connection is certainly in the system's table.
+    let detected = peer
+        .zip(shared.resolver.as_ref())
+        .and_then(|(peer, resolve)| resolve(peer, shared.port));
+    let browser = match (detected, reported) {
+        (Some(app), _) => BrowserInfo {
+            app,
+            source: BrowserSource::Detected,
+        },
+        (None, Some(app)) => BrowserInfo {
+            app,
+            source: BrowserSource::Reported,
+        },
+        (None, None) => BrowserInfo {
+            app: AppId::new(DEFAULT_BROWSER),
+            source: BrowserSource::Assumed,
+        },
     };
     if socket.get_ref().set_read_timeout(Some(READ_SLICE)).is_err() {
         return;
@@ -280,8 +382,9 @@ fn check_origin(request: &Request, response: Response) -> Result<Response, Error
     }
 }
 
-/// Waits for a valid `hello`. Returns the browser's executable on success.
-fn pair(socket: &mut WebSocket<TcpStream>, shared: &Shared) -> Option<AppId> {
+/// Waits for a valid `hello`. Returns, on success, the browser executable the
+/// extension claimed to run in (`Some(None)` if it claimed nothing).
+fn pair(socket: &mut WebSocket<TcpStream>, shared: &Shared) -> Option<Option<AppId>> {
     let hello = loop {
         match socket.read().ok()? {
             Message::Text(text) => break serde_json::from_str::<ClientMessage>(&text).ok(),
@@ -303,7 +406,7 @@ fn pair(socket: &mut WebSocket<TcpStream>, shared: &Shared) -> Option<AppId> {
             } else if !tokens_match(&token, &shared.token) {
                 Err("wrong pairing token".to_string())
             } else {
-                Ok(AppId::new(browser.as_deref().unwrap_or(DEFAULT_BROWSER)))
+                Ok(browser.as_deref().map(AppId::new))
             }
         }
         _ => Err("expected hello".to_string()),
@@ -587,6 +690,64 @@ mod tests {
         assert_eq!(bridge.tabs()[0].title, "Music");
         assert!(bridge.tabs()[0].audible);
         assert_eq!(bridge.browser(), AppId::new("msedge.exe"));
+    }
+
+    fn hello_with_browser(bridge: &Bridge, browser: &str) -> Client {
+        let mut client = connect(bridge);
+        say(
+            &mut client,
+            &format!(r#"{{"type":"hello","version":1,"token":"{TOKEN}","browser":"{browser}"}}"#),
+        );
+        assert_eq!(hear(&mut client)["ok"], true);
+        client
+    }
+
+    fn start_resolving(found: Option<&'static str>) -> Bridge {
+        let resolver: PeerResolver = Arc::new(move |_peer, _port| found.map(AppId::new));
+        Bridge::start_with(0, TOKEN.to_string(), Some(resolver)).unwrap()
+    }
+
+    #[test]
+    fn the_detected_browser_beats_the_extensions_guess() {
+        let bridge = start_resolving(Some("brave.exe"));
+        let _client = hello_with_browser(&bridge, "chrome.exe");
+        wait_until("connected", || bridge.state().client.is_some());
+
+        let info = bridge.browser_info();
+        assert_eq!(info.app, AppId::new("brave.exe"));
+        assert_eq!(info.source, BrowserSource::Detected);
+    }
+
+    #[test]
+    fn without_a_detection_the_extensions_guess_is_used() {
+        let bridge = start_resolving(None);
+        let _client = hello_with_browser(&bridge, "msedge.exe");
+        wait_until("connected", || bridge.state().client.is_some());
+
+        let info = bridge.browser_info();
+        assert_eq!(info.app, AppId::new("msedge.exe"));
+        assert_eq!(info.source, BrowserSource::Reported);
+    }
+
+    #[test]
+    fn the_browser_chosen_by_the_user_beats_everything() {
+        let bridge = start_resolving(Some("brave.exe"));
+        let _client = hello_with_browser(&bridge, "chrome.exe");
+        wait_until("connected", || bridge.state().client.is_some());
+
+        bridge.set_browser_override(Some(AppId::new("vivaldi.exe")));
+        assert_eq!(bridge.browser_info().app, AppId::new("vivaldi.exe"));
+        assert_eq!(bridge.browser_info().source, BrowserSource::Chosen);
+
+        bridge.set_browser_override(None);
+        assert_eq!(bridge.browser_info().source, BrowserSource::Detected);
+    }
+
+    #[test]
+    fn with_no_connection_the_browser_is_assumed() {
+        let bridge = start();
+        assert_eq!(bridge.browser_info().source, BrowserSource::Assumed);
+        assert_eq!(bridge.browser_info().app, AppId::new(DEFAULT_BROWSER));
     }
 
     #[test]

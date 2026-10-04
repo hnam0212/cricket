@@ -12,12 +12,16 @@ pub mod matching;
 #[cfg(windows)]
 mod com;
 #[cfg(windows)]
+mod peer;
+#[cfg(windows)]
 mod sessions;
 #[cfg(windows)]
 pub mod shutdown;
 #[cfg(windows)]
 mod smtc;
 
+#[cfg(windows)]
+pub use peer::client_process;
 #[cfg(windows)]
 pub use sessions::WinAudioBackend;
 #[cfg(windows)]
