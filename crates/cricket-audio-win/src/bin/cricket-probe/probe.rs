@@ -228,6 +228,10 @@ impl Log {
         }
     }
 
+    pub fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+
     pub fn line(&self, message: &str) {
         println!("[{:>8.3}s] {message}", self.started.elapsed().as_secs_f64());
     }

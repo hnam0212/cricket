@@ -7,7 +7,8 @@ use crate::settings::Settings;
 
 /// Why the machine counts as busy. Kept for logs and the diagnostics view,
 /// so the user can see why the music paused.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActivityCause {
     Sound { app: AppId, peak: f32 },
     Microphone { app: AppId },

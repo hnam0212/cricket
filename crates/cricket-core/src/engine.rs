@@ -15,7 +15,7 @@ use crate::settings::Settings;
 /// command before the engine concludes the command did nothing.
 const COMMAND_TIMEOUT: Duration = Duration::from_millis(1500);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum State {
     /// Disabled, or not started yet.
     Idle,

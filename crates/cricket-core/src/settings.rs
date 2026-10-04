@@ -5,7 +5,13 @@
 
 use std::time::Duration;
 
-#[derive(Debug, Clone, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+/// Longest delay or fade a saved configuration may ask for.
+const MAX_DURATION_MS: u64 = 60_000;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     /// How long other sound must last before the music is paused.
     pub trigger_delay_ms: u64,
@@ -38,6 +44,20 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// The same settings with every value pulled into its valid range.
+    pub fn sanitized(mut self) -> Self {
+        self.trigger_delay_ms = self.trigger_delay_ms.min(MAX_DURATION_MS);
+        self.resume_cooldown_ms = self.resume_cooldown_ms.min(MAX_DURATION_MS);
+        self.fade_out_ms = self.fade_out_ms.min(MAX_DURATION_MS);
+        self.fade_in_ms = self.fade_in_ms.min(MAX_DURATION_MS);
+        self.sound_threshold = if self.sound_threshold.is_finite() {
+            self.sound_threshold.clamp(0.0, 1.0)
+        } else {
+            Settings::default().sound_threshold
+        };
+        self
+    }
+
     pub fn trigger_delay(&self) -> Duration {
         Duration::from_millis(self.trigger_delay_ms)
     }

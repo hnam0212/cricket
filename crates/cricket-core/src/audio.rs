@@ -6,13 +6,28 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// Identifies an application by its executable name, lowercased
 /// (for example `spotify.exe`).
 ///
 /// One app can own several audio sessions and several processes (Chrome has
 /// many), so the executable name is the unit Cricket reasons about.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub struct AppId(String);
+
+impl From<String> for AppId {
+    fn from(name: String) -> Self {
+        Self::new(&name)
+    }
+}
+
+impl From<AppId> for String {
+    fn from(app: AppId) -> Self {
+        app.0
+    }
+}
 
 impl AppId {
     pub fn new(name: &str) -> Self {
@@ -101,7 +116,7 @@ pub fn group_sessions(sessions: &[SessionInfo]) -> Vec<AppActivity> {
 }
 
 /// Playback state of a media source as far as the OS can tell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum PlaybackState {
     Playing,
     Paused,

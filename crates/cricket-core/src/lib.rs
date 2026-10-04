@@ -5,7 +5,9 @@
 pub mod activity;
 pub mod audio;
 pub mod clock;
+pub mod config;
 pub mod engine;
+pub mod eventlog;
 pub mod fade;
 pub mod runner;
 pub mod settings;
