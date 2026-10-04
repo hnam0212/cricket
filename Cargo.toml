@@ -5,7 +5,6 @@ members = ["crates/*", "src-tauri"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
 repository = "https://github.com/hnam0212/cricket"
 
 [workspace.dependencies]

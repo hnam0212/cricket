@@ -3,7 +3,6 @@ name = "cricket-core"
 description = "Platform-agnostic core of Cricket: engine, settings, backend traits"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 repository.workspace = true
 
 [dependencies]

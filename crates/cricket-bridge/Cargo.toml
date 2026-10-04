@@ -3,7 +3,6 @@ name = "cricket-bridge"
 description = "WebSocket bridge between the Cricket app and the Chrome extension"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 repository.workspace = true
 
 [dependencies]

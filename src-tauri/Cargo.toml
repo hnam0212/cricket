@@ -3,7 +3,6 @@ name = "cricket"
 description = "Keeps background music playing while the machine is quiet"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 repository.workspace = true
 
 [lib]
