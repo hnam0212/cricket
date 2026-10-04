@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Cricket</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        font-size: 13px;
+      }
+      body {
+        width: 280px;
+        margin: 12px;
+      }
+      h1 {
+        font-size: 15px;
+        margin: 0 0 8px;
+      }
+      label {
+        display: block;
+        margin-top: 8px;
+      }
+      input {
+        font: inherit;
+        box-sizing: border-box;
+        width: 100%;
+        margin-top: 2px;
+        padding: 4px 6px;
+      }
+      button {
+        font: inherit;
+        margin-top: 10px;
+        padding: 4px 12px;
+      }
+      #status {
+        margin: 0 0 4px;
+        padding: 6px 8px;
+        border-left: 3px solid #888;
+      }
+      #status[data-state="connected"] {
+        border-left-color: #2e7d32;
+      }
+      #status[data-state="rejected"] {
+        border-left-color: #b3261e;
+      }
+      #note {
+        min-height: 1.2em;
+        margin: 6px 0 0;
+        opacity: 0.75;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Cricket</h1>
+    <p id="status" role="status"></p>
+    <form id="form">
+      <label>
+        Pairing token
+        <input id="token" type="text" autocomplete="off" spellcheck="false" />
+      </label>
+      <label>
+        Port
+        <input id="port" type="number" min="1" max="65535" />
+      </label>
+      <button type="submit">Save</button>
+    </form>
+    <p id="note"></p>
+    <script src="dist/popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "cricket-extension",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.4",
+    "typescript": "^6.0.3"
+  }
+}
