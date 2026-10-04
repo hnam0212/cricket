@@ -2,6 +2,7 @@
   "name": "cricket",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "pnpm@12.8.1",
   "scripts": {
     "tauri": "tauri"
   },
