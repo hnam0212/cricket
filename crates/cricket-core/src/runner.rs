@@ -2,21 +2,23 @@
 //! machine, ticks the engine and carries out its commands.
 //!
 //! The engine itself stays free of I/O; all of it happens here, through the
-//! two backend traits. The caller owns the loop and the sleeping.
+//! backend traits. The caller owns the loop and the sleeping.
 
-use crate::activity::{detect_activity, ActivityCause};
-use crate::audio::{
-    ActivitySnapshot, AppId, AudioBackend, BackendError, MediaController, PlaybackState,
-};
+use crate::activity::{detect_activity, detect_tab_activity, ActivityCause};
+use crate::audio::{ActivitySnapshot, AudioBackend, BackendError, MediaController, PlaybackState};
 use crate::clock::Clock;
 use crate::engine::{Command, Engine, Observation, State, TickOutput};
 use crate::settings::Settings;
+use crate::source::{Source, TabBridge, TabInfo};
 
 /// Everything that happened in one step, for logs and diagnostics.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct StepReport {
     /// What the machine was doing. `None` if it could not be read.
     pub snapshot: Option<ActivitySnapshot>,
+    /// Open browser tabs, if an extension is connected.
+    pub tabs: Vec<TabInfo>,
+    pub bridge_connected: bool,
     /// Why the machine counts as busy, if it does.
     pub activity: Option<ActivityCause>,
     pub playback: Option<PlaybackState>,
@@ -26,22 +28,24 @@ pub struct StepReport {
     pub errors: Vec<String>,
 }
 
-pub struct Runner<A, M, C: Clock + Clone> {
+pub struct Runner<A, M, B, C: Clock + Clone> {
     audio: A,
     media: M,
+    tabs: B,
     clock: C,
     engine: Engine<C>,
-    source: Option<AppId>,
+    source: Option<Source>,
     settings: Settings,
     enabled: bool,
 }
 
-impl<A: AudioBackend, M: MediaController, C: Clock + Clone> Runner<A, M, C> {
+impl<A: AudioBackend, M: MediaController, B: TabBridge, C: Clock + Clone> Runner<A, M, B, C> {
     /// Starts enabled and without a music source.
-    pub fn new(audio: A, media: M, clock: C, settings: Settings) -> Self {
+    pub fn new(audio: A, media: M, tabs: B, clock: C, settings: Settings) -> Self {
         Self {
             audio,
             media,
+            tabs,
             engine: Engine::new(clock.clone(), settings.clone()),
             clock,
             source: None,
@@ -58,7 +62,7 @@ impl<A: AudioBackend, M: MediaController, C: Clock + Clone> Runner<A, M, C> {
         }
     }
 
-    pub fn source(&self) -> Option<&AppId> {
+    pub fn source(&self) -> Option<&Source> {
         self.source.as_ref()
     }
 
@@ -76,11 +80,20 @@ impl<A: AudioBackend, M: MediaController, C: Clock + Clone> Runner<A, M, C> {
     /// Switches to another music source, or to none. The old source is
     /// handed back first: if a fade was under way its volume is restored.
     /// Music Cricket had paused stays paused. Returns backend errors.
-    pub fn set_source(&mut self, source: Option<AppId>) -> Vec<String> {
-        if source == self.source {
+    pub fn set_source(&mut self, source: Option<Source>) -> Vec<String> {
+        let unchanged = match (&self.source, &source) {
+            (Some(old), Some(new)) => old.same_target(new),
+            (None, None) => true,
+            _ => false,
+        };
+        if unchanged {
             return Vec::new();
         }
         let errors = self.hand_back();
+        self.tabs.select(match &source {
+            Some(Source::Tab { id, .. }) => Some(*id),
+            _ => None,
+        });
         self.source = source;
         // A fresh engine: timers and the remembered volume belong to the
         // old source.
@@ -112,7 +125,11 @@ impl<A: AudioBackend, M: MediaController, C: Clock + Clone> Runner<A, M, C> {
     }
 
     pub fn step(&mut self) -> StepReport {
-        let mut report = StepReport::default();
+        let mut report = StepReport {
+            bridge_connected: self.tabs.connected(),
+            tabs: self.tabs.tabs(),
+            ..StepReport::default()
+        };
 
         let snapshot = match self.audio.snapshot() {
             Ok(snapshot) => snapshot,
@@ -128,18 +145,30 @@ impl<A: AudioBackend, M: MediaController, C: Clock + Clone> Runner<A, M, C> {
             return report;
         };
 
-        report.activity = detect_activity(&snapshot, &source, &self.settings);
+        match &source {
+            Source::App { app } => {
+                report.activity = detect_activity(&snapshot, app, &self.settings);
+                report.playback = optional(
+                    self.media.playback_state(app),
+                    "read playback state",
+                    &mut report.errors,
+                );
+                report.volume = optional(self.audio.volume(app), "read volume", &mut report.errors);
+            }
+            Source::Tab { id, .. } => {
+                let browser = self.tabs.browser();
+                report.activity =
+                    detect_tab_activity(&snapshot, &browser, &report.tabs, *id, &self.settings);
+                report.playback = optional(
+                    self.tabs.playback_state(*id),
+                    "read tab playback state",
+                    &mut report.errors,
+                );
+                report.volume =
+                    optional(self.tabs.volume(*id), "read tab volume", &mut report.errors);
+            }
+        }
         report.snapshot = Some(snapshot);
-        report.playback = optional(
-            self.media.playback_state(&source),
-            "read playback state",
-            &mut report.errors,
-        );
-        report.volume = optional(
-            self.audio.volume(&source),
-            "read volume",
-            &mut report.errors,
-        );
 
         report.output = self.engine.tick(&Observation {
             other_activity: report.activity.is_some(),
@@ -151,12 +180,19 @@ impl<A: AudioBackend, M: MediaController, C: Clock + Clone> Runner<A, M, C> {
         report
     }
 
-    fn execute(&mut self, source: &AppId, commands: &[Command], errors: &mut Vec<String>) {
+    fn execute(&mut self, source: &Source, commands: &[Command], errors: &mut Vec<String>) {
         for command in commands {
-            let result = match *command {
-                Command::Pause => self.media.pause(source),
-                Command::Resume => self.media.play(source),
-                Command::SetVolume(level) => self.audio.set_volume(source, level),
+            let result = match (source, *command) {
+                (Source::App { app }, Command::Pause) => self.media.pause(app),
+                (Source::App { app }, Command::Resume) => self.media.play(app),
+                (Source::App { app }, Command::SetVolume(level)) => {
+                    self.audio.set_volume(app, level)
+                }
+                (Source::Tab { id, .. }, Command::Pause) => self.tabs.pause(*id),
+                (Source::Tab { id, .. }, Command::Resume) => self.tabs.play(*id),
+                (Source::Tab { id, .. }, Command::SetVolume(level)) => {
+                    self.tabs.set_volume(*id, level)
+                }
             };
             // The engine notices a command that did not work through the
             // next observations; here it only needs to be reported.
@@ -167,7 +203,8 @@ impl<A: AudioBackend, M: MediaController, C: Clock + Clone> Runner<A, M, C> {
     }
 }
 
-/// A missing app is a normal answer (no session right now), not an error.
+/// A source that is not there right now (no session, tab closed, extension
+/// not connected) is a normal answer, not an error.
 fn optional<T>(
     result: Result<T, BackendError>,
     context: &str,
@@ -175,7 +212,7 @@ fn optional<T>(
 ) -> Option<T> {
     match result {
         Ok(value) => Some(value),
-        Err(BackendError::AppNotFound(_)) => None,
+        Err(BackendError::AppNotFound(_) | BackendError::Unavailable(_)) => None,
         Err(error) => {
             errors.push(format!("{context}: {error}"));
             None
@@ -190,8 +227,9 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::audio::{ActivitySnapshot, AppActivity, BackendResult};
+    use crate::audio::{ActivitySnapshot, AppActivity, AppId, BackendResult};
     use crate::clock::ManualClock;
+    use crate::source::{NoTabs, TabId};
 
     const TICK: Duration = Duration::from_millis(50);
 
@@ -284,7 +322,7 @@ mod tests {
     struct Rig {
         machine: Rc<RefCell<Machine>>,
         clock: ManualClock,
-        runner: Runner<Fake, Fake, ManualClock>,
+        runner: Runner<Fake, Fake, NoTabs, ManualClock>,
     }
 
     impl Rig {
@@ -296,8 +334,14 @@ mod tests {
             }));
             let clock = ManualClock::default();
             let fake = Fake(Rc::clone(&machine));
-            let mut runner = Runner::new(fake.clone(), fake, clock.clone(), Settings::default());
-            runner.set_source(Some(music()));
+            let mut runner = Runner::new(
+                fake.clone(),
+                fake,
+                NoTabs,
+                clock.clone(),
+                Settings::default(),
+            );
+            runner.set_source(Some(Source::App { app: music() }));
             Self {
                 machine,
                 clock,
@@ -458,11 +502,11 @@ mod tests {
         }
         assert!(rig.machine.borrow().music_volume.unwrap() < 0.6);
 
-        let errors = rig.runner.set_source(Some(AppId::new("vlc.exe")));
+        let errors = rig.runner.set_source(Some(Source::app("vlc.exe")));
 
         assert!(errors.is_empty());
         assert_eq!(rig.machine.borrow().music_volume, Some(0.6));
-        assert_eq!(rig.runner.source(), Some(&AppId::new("vlc.exe")));
+        assert_eq!(rig.runner.source(), Some(&Source::app("vlc.exe")));
     }
 
     #[test]
@@ -485,7 +529,7 @@ mod tests {
     fn disabled_stays_disabled_across_a_source_change() {
         let mut rig = Rig::new();
         rig.runner.set_enabled(false);
-        rig.runner.set_source(Some(AppId::new("vlc.exe")));
+        rig.runner.set_source(Some(Source::app("vlc.exe")));
         rig.machine.borrow_mut().other_peak = 0.4;
 
         for _ in 0..100 {
@@ -494,5 +538,218 @@ mod tests {
 
         assert_eq!(rig.runner.state(), State::Idle);
         assert_eq!(rig.machine.borrow().pauses, 0);
+    }
+
+    /// A pretend browser with one music tab and one other tab.
+    #[derive(Default)]
+    struct Browser {
+        connected: bool,
+        music_playing: bool,
+        music_volume: f32,
+        other_tab_audible: bool,
+        selected: Option<TabId>,
+        pauses: u32,
+        resumes: u32,
+    }
+
+    #[derive(Clone)]
+    struct FakeTabs(Rc<RefCell<Browser>>);
+
+    const MUSIC_TAB: TabId = TabId(1);
+
+    impl TabBridge for FakeTabs {
+        fn connected(&mut self) -> bool {
+            self.0.borrow().connected
+        }
+
+        fn browser(&mut self) -> AppId {
+            AppId::new("chrome.exe")
+        }
+
+        fn tabs(&mut self) -> Vec<TabInfo> {
+            let browser = self.0.borrow();
+            if !browser.connected {
+                return Vec::new();
+            }
+            vec![
+                TabInfo {
+                    id: MUSIC_TAB,
+                    title: "Music".to_string(),
+                    url: String::new(),
+                    audible: browser.music_playing,
+                },
+                TabInfo {
+                    id: TabId(2),
+                    title: "Video".to_string(),
+                    url: String::new(),
+                    audible: browser.other_tab_audible,
+                },
+            ]
+        }
+
+        fn select(&mut self, tab: Option<TabId>) {
+            self.0.borrow_mut().selected = tab;
+        }
+
+        fn playback_state(&mut self, _tab: TabId) -> BackendResult<PlaybackState> {
+            let browser = self.0.borrow();
+            if !browser.connected {
+                return Err(BackendError::Unavailable("not connected".to_string()));
+            }
+            Ok(if browser.music_playing {
+                PlaybackState::Playing
+            } else {
+                PlaybackState::Paused
+            })
+        }
+
+        fn volume(&mut self, _tab: TabId) -> BackendResult<f32> {
+            let browser = self.0.borrow();
+            if !browser.connected {
+                return Err(BackendError::Unavailable("not connected".to_string()));
+            }
+            Ok(browser.music_volume)
+        }
+
+        fn set_volume(&mut self, _tab: TabId, volume: f32) -> BackendResult<()> {
+            self.0.borrow_mut().music_volume = volume;
+            Ok(())
+        }
+
+        fn pause(&mut self, _tab: TabId) -> BackendResult<()> {
+            let mut browser = self.0.borrow_mut();
+            browser.music_playing = false;
+            browser.pauses += 1;
+            Ok(())
+        }
+
+        fn play(&mut self, _tab: TabId) -> BackendResult<()> {
+            let mut browser = self.0.borrow_mut();
+            browser.music_playing = true;
+            browser.resumes += 1;
+            Ok(())
+        }
+    }
+
+    struct TabRig {
+        machine: Rc<RefCell<Machine>>,
+        browser: Rc<RefCell<Browser>>,
+        clock: ManualClock,
+        runner: Runner<Fake, Fake, FakeTabs, ManualClock>,
+    }
+
+    impl TabRig {
+        /// Chrome is audible on the desktop (it is playing the music), and
+        /// the music tab is the source.
+        fn new() -> Self {
+            let machine = Rc::new(RefCell::new(Machine {
+                other_peak: 0.5,
+                ..Machine::default()
+            }));
+            let browser = Rc::new(RefCell::new(Browser {
+                connected: true,
+                music_playing: true,
+                music_volume: 1.0,
+                ..Browser::default()
+            }));
+            let clock = ManualClock::default();
+            let fake = Fake(Rc::clone(&machine));
+            let mut runner = Runner::new(
+                fake.clone(),
+                fake,
+                FakeTabs(Rc::clone(&browser)),
+                clock.clone(),
+                Settings::default(),
+            );
+            runner.set_source(Some(Source::Tab {
+                id: MUSIC_TAB,
+                title: "Music".to_string(),
+            }));
+            Self {
+                machine,
+                browser,
+                clock,
+                runner,
+            }
+        }
+
+        fn step(&mut self) -> StepReport {
+            let report = self.runner.step();
+            self.clock.advance(TICK);
+            report
+        }
+
+        fn run_until(&mut self, state: State) {
+            for _ in 0..2000 {
+                if self.runner.state() == state {
+                    return;
+                }
+                self.step();
+            }
+            panic!(
+                "never reached {state:?}, stuck in {:?}",
+                self.runner.state()
+            );
+        }
+    }
+
+    #[test]
+    fn picking_a_tab_tells_the_extension_which_one() {
+        let mut rig = TabRig::new();
+        assert_eq!(rig.browser.borrow().selected, Some(MUSIC_TAB));
+
+        rig.runner.set_source(Some(Source::app("spotify.exe")));
+        assert_eq!(rig.browser.borrow().selected, None);
+    }
+
+    // Scenario 2: music in tab A, a video in tab B.
+    #[test]
+    fn another_tab_pauses_the_music_tab_and_silence_resumes_it() {
+        let mut rig = TabRig::new();
+        for _ in 0..100 {
+            rig.step();
+        }
+        // Chrome's own sound (the music) must not have triggered anything.
+        assert_eq!(rig.runner.state(), State::Playing);
+
+        rig.browser.borrow_mut().other_tab_audible = true;
+        rig.run_until(State::PausedByCricket);
+        rig.step();
+        assert!(!rig.browser.borrow().music_playing);
+        assert_eq!(rig.browser.borrow().music_volume, 1.0);
+
+        rig.browser.borrow_mut().other_tab_audible = false;
+        rig.run_until(State::Playing);
+        let browser = rig.browser.borrow();
+        assert!(browser.music_playing);
+        assert_eq!(browser.music_volume, 1.0);
+        assert_eq!((browser.pauses, browser.resumes), (1, 1));
+        // The desktop media controls were never used for a tab source.
+        assert_eq!(rig.machine.borrow().pauses, 0);
+    }
+
+    #[test]
+    fn a_tab_source_reports_the_tab_list() {
+        let mut rig = TabRig::new();
+
+        let report = rig.step();
+
+        assert!(report.bridge_connected);
+        assert_eq!(report.tabs.len(), 2);
+        assert_eq!(report.playback, Some(PlaybackState::Playing));
+    }
+
+    #[test]
+    fn a_disconnected_extension_means_the_tab_is_not_available() {
+        let mut rig = TabRig::new();
+        rig.step();
+        rig.browser.borrow_mut().connected = false;
+
+        let report = rig.step();
+
+        assert_eq!(report.playback, None);
+        assert!(report.errors.is_empty());
+        assert_eq!(rig.runner.state(), State::PausedByUser);
+        assert_eq!(rig.browser.borrow().pauses, 0);
     }
 }

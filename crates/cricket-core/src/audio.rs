@@ -132,6 +132,9 @@ pub enum BackendError {
     /// The OS accepted the call but refused the request (for example the
     /// media session rejected a pause).
     Rejected(String),
+    /// The source cannot be reached right now (tab closed, browser
+    /// extension not connected).
+    Unavailable(String),
     /// An OS API call failed.
     Os(String),
 }
@@ -141,6 +144,7 @@ impl fmt::Display for BackendError {
         match self {
             Self::AppNotFound(app) => write!(f, "app not found: {app}"),
             Self::Rejected(what) => write!(f, "request rejected: {what}"),
+            Self::Unavailable(what) => write!(f, "unavailable: {what}"),
             Self::Os(message) => write!(f, "OS error: {message}"),
         }
     }

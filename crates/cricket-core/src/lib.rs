@@ -11,6 +11,7 @@ pub mod eventlog;
 pub mod fade;
 pub mod runner;
 pub mod settings;
+pub mod source;
 
 /// Version of the core crate, shown in the UI so we can tell the web side is
 /// really talking to the Rust side.

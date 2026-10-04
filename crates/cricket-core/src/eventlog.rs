@@ -115,6 +115,7 @@ fn activity_key(cause: &ActivityCause) -> String {
     match cause {
         ActivityCause::Sound { app, .. } => format!("sound:{app}"),
         ActivityCause::Microphone { app } => format!("mic:{app}"),
+        ActivityCause::Tab { title } => format!("tab:{title}"),
     }
 }
 
