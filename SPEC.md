@@ -132,7 +132,7 @@ Each phase ends with a manual test checklist for the user. Do not start the next
 
 ### Phase 3: UI
 - [x] Source picker, on/off, status, settings panel, tray, mini mode, persistence, diagnostics view.
-- [ ] Manual test: scenarios 3, 4, 5 through the real UI.
+- [x] Manual test: scenarios 3, 4, 5 through the real UI.
 
 ### Phase 4: Chrome extension
 - [ ] Bridge crate, pairing flow, extension (tabs list, select, pause, resume, fade).
